@@ -256,3 +256,11 @@ fieldset:disabled .switch { opacity: .42; }
 .segment-play { width: 26px; min-height: 26px; padding: 4px; }
 .segment-play[aria-pressed="true"] { background: var(--hover); }
 .transcript-segment.playing .segment-time { color: var(--text); }
+.profile-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.profile { padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.profile-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.profile-head strong { font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.profile-checks { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 8px; font-size: 12px; }
+.profile-checks label { display: inline-flex; align-items: center; gap: 6px; }
+.profile-add { display: flex; gap: 8px; }
+.profile-add input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--control-line); border-radius: 4px; background: var(--surface); color: var(--text); }

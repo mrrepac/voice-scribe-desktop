@@ -17,6 +17,7 @@ import { renderReview, type ReviewBlock } from './proofread-review';
 import type { ProofreadResult, ProofreadMode } from '../shared/proofread';
 import { WorkProgress } from '../shared/work-progress';
 import type { ModelEntry } from '../shared/models';
+import { applyProfile, findProfile, normalizeApp, type AppProfile } from '../shared/profiles';
 import type { UpdateState } from '../shared/updates';
 import { HOTKEYS } from '../shared/hotkeys';
 
@@ -63,6 +64,8 @@ interface Session {
   proofreadingStarted?: boolean;
   stopRequested: boolean;
   segmenter: Segmenter | null;
+  /** Executable whose application profile this dictation uses. */
+  profile?: string;
   /** Raw 16 kHz microphone blocks; recognized directly, without the Opus round trip. */
   pcm: Float32Array[];
   parts: string[];
@@ -219,7 +222,7 @@ function setPhase(value: Phase, message?: string): void {
   const descriptions: Record<Phase, string> = {
     idle: '',
     starting: 'Разрешите приложению использовать микрофон, если Windows спросит.',
-    recording: session?.target ? 'После остановки текст вставится в выбранное поле.' : '',
+    recording: session?.target ? `После остановки текст вставится в выбранное поле.${session.profile ? ` Профиль: ${session.profile}.` : ''}` : '',
     transcribing: '',
     preparing: warming ? 'Диктовку можно начать сразу: распознавание дождётся модели.' : 'Первая загрузка может занять несколько минут.',
     error: message ?? 'Проверьте настройки и начните снова.',
@@ -712,6 +715,22 @@ async function start(target: string | null): Promise<void> {
   lastSeconds = 0;
   $('timer').textContent = '00:00';
   setPhase('starting');
+  if (target) {
+    const lookup = api.windowProcess(target).catch(() => null);
+    void lookup.then(rememberApp);
+    if (settings.profiles.length) {
+      // A stuck helper must not delay the recording: give up after 300 ms.
+      const process = await Promise.race([lookup, new Promise<null>(resolve => setTimeout(() => resolve(null), 300))]);
+      if (!valid(token)) return;
+      const profile = findProfile(settings.profiles, process);
+      if (profile) {
+        active.settings = applyProfile(active.settings, profile);
+        active.profile = profile.app;
+        if (profile.enter) active.enter = true;
+        if (profile.proofread && active.settings.llmEnabled) { active.proofread = true; active.proofreadMode = 'plain'; }
+      }
+    }
+  }
   // Load the model while the user speaks. Errors resurface from transcription.
   void asr.prepare(active.settings, progress => messageProgress(progress, token)).catch(() => {});
   if (active.settings.live) {
@@ -1243,6 +1262,85 @@ function renderHotkeyLabels(): void {
   for (const element of document.querySelectorAll<HTMLElement>('[data-hotkey]')) element.textContent = element.dataset.hotkey === 'proofread' ? keys.proofread : keys.label;
 }
 
+const recentApps = new Set<string>();
+function rememberApp(process: string | null): void {
+  const app = process ? normalizeApp(process) : '';
+  if (!app || app === 'voice scribe.exe' || recentApps.has(app)) return;
+  recentApps.add(app);
+  $('recent-apps').append(new Option(app));
+}
+
+function optionsOf(name: 'model' | 'language', globalLabel: string): HTMLOptionElement[] {
+  const source = form.querySelector<HTMLSelectElement>(`[name="${name}"]`)!;
+  return [new Option(globalLabel, ''), ...Array.from(source.options, option => new Option(option.text, option.value))];
+}
+
+function renderProfiles(): void {
+  $('profile-list').replaceChildren(...settings.profiles.map((profile, index) => {
+    const card = document.createElement('div');
+    card.className = 'profile';
+    const head = document.createElement('div');
+    head.className = 'profile-head';
+    const name = document.createElement('strong');
+    name.textContent = profile.app;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'text-button danger';
+    remove.textContent = 'Удалить';
+    remove.setAttribute('aria-label', `Удалить профиль ${profile.app}`);
+    remove.addEventListener('click', () => {
+      settings = { ...settings, profiles: settings.profiles.filter((_, i) => i !== index) };
+      renderProfiles();
+      queueSettingsSave();
+    });
+    head.append(name, remove);
+    const grid = document.createElement('div');
+    grid.className = 'settings-grid';
+    const update = (change: Partial<AppProfile>) => {
+      // The form's change listener saves right after this handler.
+      settings = { ...settings, profiles: settings.profiles.map((item, i) => i === index ? { ...item, ...change } : item) };
+    };
+    const select = (label: string, key: 'model' | 'language', global: string) => {
+      const field = document.createElement('label');
+      field.className = 'field';
+      field.append(label);
+      const control = document.createElement('select');
+      control.append(...optionsOf(key, global));
+      control.value = profile[key];
+      control.addEventListener('change', () => update({ [key]: control.value } as Partial<AppProfile>));
+      field.append(control);
+      return field;
+    };
+    grid.append(select('Модель', 'model', 'Как в настройках'), select('Язык', 'language', 'Как в настройках'));
+    const checks = document.createElement('div');
+    checks.className = 'profile-checks';
+    const check = (label: string, key: 'enter' | 'proofread') => {
+      const field = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = profile[key];
+      box.addEventListener('change', () => update({ [key]: box.checked } as Partial<AppProfile>));
+      field.append(box, label);
+      return field;
+    };
+    checks.append(check('Нажимать Enter после вставки', 'enter'), check('Вычитывать через API перед вставкой', 'proofread'));
+    card.append(head, grid, checks);
+    return card;
+  }));
+}
+
+function addProfile(): void {
+  const input = $<HTMLInputElement>('profile-app');
+  const app = normalizeApp(input.value);
+  if (!app) { toast('Укажите программу, например telegram.exe.', true); input.focus(); return; }
+  if (settings.profiles.some(profile => profile.app === app)) { toast(`Профиль для ${app} уже есть.`, true); return; }
+  if (settings.profiles.length >= 50) { toast('Можно создать до 50 профилей.', true); return; }
+  settings = { ...settings, profiles: [...settings.profiles, { app, model: '', language: '', enter: false, proofread: false }] };
+  input.value = '';
+  renderProfiles();
+  queueSettingsSave();
+}
+
 function applySettings(): void {
   for (const [name, value] of Object.entries(settings)) {
     const control = form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
@@ -1251,6 +1349,7 @@ function applySettings(): void {
     else control.value = String(value);
   }
   $('engine-summary').textContent = engineSummary(settings);
+  renderProfiles();
   renderHotkeyLabels();
 }
 
@@ -1559,6 +1658,8 @@ $('history-clear-dialog').addEventListener('close',()=>{
   });
 });
 $('refresh-mics').addEventListener('click', () => void refreshMicrophones());
+$('profile-add-button').addEventListener('click', addProfile);
+$('profile-app').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addProfile(); } });
 function renderNativeHealth(state: import('../main/native-recovery').NativeHealth): void {
   $('native-health').textContent=state.message;
   $<HTMLButtonElement>('native-restart').disabled=state.retrying;

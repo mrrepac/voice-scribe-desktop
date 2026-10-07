@@ -42,3 +42,49 @@ export async function dictationSmokeTest(win: BrowserWindow): Promise<{ first: s
     return report;
   });
 }
+
+/**
+ * An application profile through the settings UI, then a dictation that targets
+ * a window of this process (electron.exe in development): the profile's language
+ * must apply. Forcing English on Russian speech makes Whisper answer in Latin script.
+ */
+export async function profileSmokeTest(win: BrowserWindow, target: string): Promise<{ description: string; text: string }> {
+  const send = (command: object) => win.webContents.send('command', command);
+  await win.webContents.executeJavaScript(`(async () => {
+    document.querySelector('[data-view="settings"]').click();
+    document.getElementById('profile-app').value = 'Electron';
+    document.getElementById('profile-add-button').click();
+    const card = document.querySelector('#profile-list .profile');
+    if (!card || card.querySelector('strong').textContent !== 'electron.exe') throw new Error('Profile was not added');
+    const language = card.querySelectorAll('select')[1];
+    language.value = 'en';
+    language.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 600));
+    const saved = (await window.scribe.getSettings()).profiles;
+    if (saved.length !== 1 || saved[0].language !== 'en') throw new Error('Profile was not saved: ' + JSON.stringify(saved));
+    document.querySelector('[data-view="dictation"]').click();
+  })()`);
+  send({ action: 'toggle', target });
+  const description: string = await win.webContents.executeJavaScript(`(async () => {
+    const end = Date.now() + 20000;
+    while (document.getElementById('record-card').dataset.phase !== 'recording') { if (Date.now() > end) throw new Error('Recording did not start'); await new Promise(r => setTimeout(r, 50)); }
+    return document.getElementById('record-description').textContent;
+  })()`);
+  await new Promise(resolve => setTimeout(resolve, 8500));
+  send({ action: 'toggle', target });
+  const text: string = await win.webContents.executeJavaScript(`(async () => {
+    const end = Date.now() + 180000;
+    while (document.getElementById('record-card').dataset.phase !== 'idle') { if (Date.now() > end) throw new Error('No transcript'); await new Promise(r => setTimeout(r, 100)); }
+    return document.getElementById('result-text').value;
+  })()`);
+  // Remove the profile through the UI so later smoke runs start clean.
+  await win.webContents.executeJavaScript(`(async () => {
+    document.querySelector('#profile-list .profile .danger').click();
+    await new Promise(r => setTimeout(r, 600));
+    if ((await window.scribe.getSettings()).profiles.length) throw new Error('Profile was not removed');
+  })()`);
+  assert.match(description, /Профиль: electron\.exe/u);
+  assert.match(text, /[a-z]{3}/iu, `English text expected: ${text}`);
+  assert.doesNotMatch(text, /[а-яё]{3}/iu, `English text expected: ${text}`);
+  return { description, text };
+}

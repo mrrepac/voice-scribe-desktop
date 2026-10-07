@@ -12,13 +12,14 @@ export interface Settings {
   silenceSeconds: number; live: boolean; sounds: boolean; warmup: boolean;
   startAtLogin: boolean; diarization: boolean;
   historyLimit: number; hotkey: Hotkey; restoreClipboard: boolean;
+  profiles: import('./profiles').AppProfile[];
 }
 export const DEFAULT_SETTINGS: Settings = {
   llmEnabled: false, llmBaseUrl: 'https://api.openai.com/v1', llmModel: '',
   model: 'auto', device: 'auto', language: 'ru', language2: '', microphone: '',
   voiceCommands: false, replacements: '', silenceSeconds: 0, live: false,
   sounds: true, warmup: false, startAtLogin: false, diarization: true,
-  historyLimit: 100, hotkey: 'ctrl-space', restoreClipboard: false,
+  historyLimit: 100, hotkey: 'ctrl-space', restoreClipboard: false, profiles: [],
 };
 /** audioPath: the source file of a file transcript, for playing cues; set by the main process only. */
 export interface HistoryItem extends TranscriptDetails { id: string; text: string; createdAt: string; source: 'dictation' | 'file'; pinned?: boolean; audioPath?: string; }
@@ -65,6 +66,8 @@ export interface ScribeAPI {
   recognizeGigaam(pcm: Float32Array, timed: boolean): Promise<import('./transcript').Transcript>;
   cancelGigaam(): Promise<void>;
   listDownloadedModels(): Promise<import('./models').ModelEntry[]>;
+  /** Executable of the window a dictation targets; null when unknown. */
+  windowProcess(target: string): Promise<string | null>;
   deleteDownloadedModel(id: import('./models').ModelId): Promise<import('./models').ModelEntry[]>;
   onGigaamProgress(handler: (progress: import('./gigaam').GigaamProgress) => void): () => void;
   onDiarizationProgress(handler: (progress: SpeakerProgress) => void): () => void;

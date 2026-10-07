@@ -31,6 +31,7 @@ const api: ScribeAPI = {
   recognizeGigaam:(pcm,timed)=>ipcRenderer.invoke('gigaam:recognize',pcm,timed),
   cancelGigaam:()=>ipcRenderer.invoke('gigaam:cancel'),
   listDownloadedModels:()=>ipcRenderer.invoke('models:list'),
+  windowProcess:target=>ipcRenderer.invoke('window:process',target),
   deleteDownloadedModel:id=>ipcRenderer.invoke('models:delete',id),
   onGigaamProgress:handler=>{const fn=(_:unknown,value:import('../shared/gigaam').GigaamProgress)=>handler(value);ipcRenderer.on('gigaam:progress',fn);return()=>ipcRenderer.removeListener('gigaam:progress',fn);},
   onDiarizationProgress:handler=>{const fn=(_:unknown,value:import('../shared/speakers').SpeakerProgress)=>handler(value);ipcRenderer.on('speakers:progress',fn);return()=>ipcRenderer.removeListener('speakers:progress',fn);},

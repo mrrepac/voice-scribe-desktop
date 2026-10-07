@@ -25,13 +25,13 @@ import { NativeRecovery } from './native-recovery';
 import { historySmokeTest } from './history-smoke';
 import { clipboardSmokeTest } from './clipboard-smoke';
 import { gigaamSmokeTest } from './gigaam-smoke';
-import { dictationSmokeTest } from './dictation-smoke';
+import { dictationSmokeTest, profileSmokeTest } from './dictation-smoke';
 import { playbackSmokeTest } from './playback-smoke';
 import { HOTKEYS, type Hotkey } from '../shared/hotkeys';
 
 const smoke = process.argv.includes('--smoke-test');
 // A fake microphone plays the Russian fixture once (see tests/gigaam-fixture.ps1).
-if(smoke && process.argv.includes('--dictation-test')){
+if(smoke && (process.argv.includes('--dictation-test') || process.argv.includes('--profile-test'))){
   app.commandLine.appendSwitch('use-fake-device-for-media-stream');
   app.commandLine.appendSwitch('use-file-for-fake-audio-capture',path.join(process.cwd(),'artifacts','fixture-ru.wav')+'%noloop');
 }
@@ -72,10 +72,11 @@ const updates = new UpdateService(autoUpdater, installed, active, state => {
   if(win && !win.isDestroyed())win.webContents.send('updates:state',state);
 });
 function show():void { win.show(); win.focus(); }
-function ownWindowId():string {
-  const handle=win.getNativeWindowHandle();
+function windowId(window:BrowserWindow):string {
+  const handle=window.getNativeWindowHandle();
   return handle.length===8?handle.readBigUInt64LE().toString():handle.readUInt32LE().toString();
 }
+function ownWindowId():string { return windowId(win); }
 function configureNativeWindow():void {
   if(win && !win.isDestroyed() && bridge.ready)void bridge.request('set-scribe-window',{target:ownWindowId()}).catch(()=>{});
 }
@@ -276,6 +277,11 @@ function setupIpc():void {
   handle('gigaam:recognize',(pcm,timed)=>gigaam.recognize(pcm,timed===true,gigaamProgress));
   handle('gigaam:cancel',()=>gigaam.cancel());
   handle('models:list',()=>models.list());
+  handle('window:process',async target=>{
+    if(typeof target!=='string' || !bridge.ready)return null;
+    try{const info=await bridge.request('window-info',{target});return typeof info?.process==='string'?info.process:null;}
+    catch{return null;}
+  });
   handle('models:delete',async id=>{
     // The worker may hold the model open; it reloads (or downloads) on next use.
     if(id==='gigaam')gigaam.cancel();
@@ -514,6 +520,11 @@ async function smokeTest():Promise<void> {
     const giga=process.argv.includes('--gigaam-test')?await gigaamSmokeTest(win):undefined;
     if(giga)console.log('GIGAAM_SMOKE',JSON.stringify(giga));
     if(process.argv.includes('--playback-test'))console.log('PLAYBACK_SMOKE',JSON.stringify(await playbackSmokeTest(win)));
+    if(process.argv.includes('--profile-test')){
+      const target=new BrowserWindow({show:false,width:300,height:200});
+      try{console.log('PROFILE_SMOKE',JSON.stringify(await profileSmokeTest(win,windowId(target))));}
+      finally{target.destroy();}
+    }
     if(process.argv.includes('--dictation-test'))console.log('DICTATION_SMOKE',JSON.stringify(await dictationSmokeTest(win)));
     if(!bridge.ready)await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Native helper startup timeout')),10000);bridge.once('ready',()=>{clearTimeout(timer);resolve();});bridge.once('failure',message=>{clearTimeout(timer);reject(new Error(message));});});
     if(process.argv.includes('--clipboard-test'))await clipboardSmokeTest(win,bridge);

@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, type Settings, type HistoryItem } from '../shared/con
 import { normalizeSegments } from '../shared/transcript';
 import { upsertReplacement, type RememberedCorrection } from '../shared/corrections';
 import { isHotkey } from '../shared/hotkeys';
+import { validateProfiles } from '../shared/profiles';
 
 const audioPathOf = (value: unknown) => typeof value === 'string' && value.length <= 1000 && path.isAbsolute(value) ? { audioPath: value } : {};
 
@@ -29,6 +30,7 @@ export function validateSettings(raw: unknown): Settings {
   if (typeof v.silenceSeconds === 'number' && Number.isFinite(v.silenceSeconds)) s.silenceSeconds = v.silenceSeconds === 0 ? 0 : Math.min(8, Math.max(2,v.silenceSeconds));
   if (isHotkey(v.hotkey)) s.hotkey = v.hotkey;
   if (typeof v.historyLimit === 'number' && Number.isInteger(v.historyLimit)) s.historyLimit = Math.min(5000,Math.max(100,v.historyLimit));
+  s.profiles = validateProfiles(v.profiles);
   return s;
 }
 export function cacheFilename(key: string): string {

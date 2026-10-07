@@ -67,11 +67,15 @@ Commands and representative replies:
 {"id":4,"command":"insert","target":"123456","enter":true}
 {"id":4,"ok":true,"status":"clipboard-only","entered":false,"reason":"target-changed"}
 {"id":5,"command":"diagnostics"}
+{"id":8,"command":"window-info","target":"123456"}
+{"id":8,"ok":true,"process":"Telegram.exe"}
 {"id":7,"command":"cancel-insert"}
 {"id":7,"ok":true,"cancelled":false}
 {"id":6,"command":"quit"}
 ```
 
+`window-info` returns the executable name of a window's process for per-application
+profiles (`process` is null when Windows does not reveal it), or `window-gone`.
 `set-active` should be true during recording and processing and false after
 completion/cancellation. The parent owns clipboard text and writes it **before**
 `insert`. The helper never reads or writes the clipboard. HWNDs are decimal

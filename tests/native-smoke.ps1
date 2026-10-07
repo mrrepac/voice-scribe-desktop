@@ -45,6 +45,12 @@ try {
     $pipeWriter.WriteLine('{"id":5,"command":"diagnostics"}')
     $diagnostics = Read-NativeMessage
     if ($diagnostics.id -ne 5 -or -not $diagnostics.inputLayoutValid -or -not $diagnostics.keyboardHookInstalled) { throw 'Live diagnostics failed.' }
+    $pipeWriter.WriteLine('{"id":8,"command":"window-info","target":"' + $target.target + '"}')
+    $info = Read-NativeMessage
+    if ($target.target -ne '0' -and ($info.id -ne 8 -or -not $info.ok -or -not ($info.process -match '\.exe$'))) { throw "window-info failed: $($info | ConvertTo-Json -Compress)" }
+    $pipeWriter.WriteLine('{"id":9,"command":"window-info","target":"bad"}')
+    $badInfo = Read-NativeMessage
+    if ($badInfo.id -ne 9 -or $badInfo.ok -ne $false -or $badInfo.error -ne 'invalid-target') { throw 'window-info validation failed.' }
     $pipeWriter.WriteLine('{"id":7,"command":"cancel-insert"}')
     $cancel = Read-NativeMessage
     if ($cancel.id -ne 7 -or -not $cancel.ok -or $cancel.cancelled -ne $false) { throw 'cancel-insert failed.' }
@@ -53,7 +59,7 @@ try {
     if ($quit.id -ne 6 -or -not $quit.ok) { throw 'quit acknowledgement failed.' }
     if (-not $process.WaitForExit(4000)) { throw 'Helper did not exit.' }
     if ($process.ExitCode -ne 0) { throw 'Helper exited with an error.' }
-    Write-Output 'Native smoke: 7 IPC checks passed; no clipboard or key injection performed.'
+    Write-Output 'Native smoke: 9 IPC checks passed; no clipboard or key injection performed.'
 }
 finally {
     if (-not $process.HasExited) { $process.Kill() }

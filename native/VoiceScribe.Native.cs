@@ -307,6 +307,9 @@ namespace VoiceScribe.Native
                 case "get-target":
                     Emit(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "target", WindowString(GetForegroundWindow()) } });
                     break;
+                case "window-info":
+                    WindowInfo(id, command);
+                    break;
                 case "diagnostics":
                     Dictionary<string, object> diagnostic = Diagnostics();
                     diagnostic.Remove("event");
@@ -332,6 +335,32 @@ namespace VoiceScribe.Native
             }
         }
 
+        // HWNDs travel as decimal strings; reject anything that cannot be a handle on this platform.
+        private static bool TryWindow(object value, out IntPtr window)
+        {
+            long number;
+            window = IntPtr.Zero;
+            if (!Int64.TryParse(value as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out number)
+                || number <= 0 || (IntPtr.Size == 4 && number > Int32.MaxValue)) return false;
+            window = new IntPtr(number);
+            return true;
+        }
+
+        // The executable of a window's process, for per-application dictation profiles. Reads nothing else.
+        private static void WindowInfo(object id, Dictionary<string, object> command)
+        {
+            IntPtr window;
+            if (!TryWindow(Value(command, "target"), out window)) { Reply(id, false, "invalid-target"); return; }
+            uint processId;
+            if (!IsWindow(window) || GetWindowThreadProcessId(window, out processId) == 0) { Reply(id, false, "window-gone"); return; }
+            string process = null;
+            try { using (Process owner = Process.GetProcessById((int)processId)) process = owner.ProcessName + ".exe"; }
+            catch (ArgumentException) { }
+            catch (InvalidOperationException) { }
+            catch (System.ComponentModel.Win32Exception) { }
+            Emit(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "process", process } });
+        }
+
         private static object Value(Dictionary<string, object> values, string name)
         {
             object value;
@@ -343,15 +372,10 @@ namespace VoiceScribe.Native
             if (pending != null) { Reply(id, false, "insert-busy"); return; }
             object enter = Value(command, "enter");
             if (enter != null && !(enter is bool)) { Reply(id, false, "enter-must-be-boolean"); return; }
-            long targetNumber;
-            if (!Int64.TryParse(Value(command, "target") as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out targetNumber)
-                || targetNumber <= 0 || (IntPtr.Size == 4 && targetNumber > Int32.MaxValue))
-            {
-                Reply(id, false, "invalid-target");
-                return;
-            }
+            IntPtr target;
+            if (!TryWindow(Value(command, "target"), out target)) { Reply(id, false, "invalid-target"); return; }
             pending = new PendingInsert {
-                Id = id, Target = new IntPtr(targetNumber), Enter = enter != null && (bool)enter,
+                Id = id, Target = target, Enter = enter != null && (bool)enter,
                 Deadline = clock.ElapsedMilliseconds + 1500
             };
             AdvanceInsert();
@@ -670,6 +694,7 @@ namespace VoiceScribe.Native
         [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
         [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
+        [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
         [DllImport("user32.dll", SetLastError = true)] private static extern uint SendInput(uint count, INPUT[] inputs, int size);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string moduleName);
         [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
