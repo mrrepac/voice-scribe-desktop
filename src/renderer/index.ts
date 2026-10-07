@@ -82,6 +82,10 @@ let generation = 0;
 let session: Session | null = null;
 let initialized = false;
 let lastResult = '';
+/** PCM of the last dictation, in memory only, for "Перераспознать". Bound to its history entry. */
+let lastAudio: { pcm: Float32Array; historyId?: string } | null = null;
+/** Twenty minutes of 16 kHz float PCM is about 77 MB; longer recordings are not kept. */
+const MAX_KEPT_AUDIO = 20 * 60 * 16000;
 let beforeProofread: ReturnType<typeof editor.snapshot> | null = null;
 let reviewText: string | null = null;
 let updateState: UpdateState = { phase: 'idle', message: 'Проверяем доступность обновлений…' };
@@ -306,6 +310,8 @@ function syncResultActions(completed = true): void {
   $<HTMLButtonElement>('proofread-result').disabled = disabled || correctionSaving || composingInput !== null;
   $<HTMLButtonElement>('undo-proofread').disabled = disabled;
   $('undo-proofread').hidden = !beforeProofread;
+  $('retranscribe').hidden = !lastAudio?.historyId || lastAudio.historyId !== currentHistoryId;
+  $<HTMLButtonElement>('retranscribe').disabled = !initialized || isBusy() || correctionSaving;
   $<HTMLButtonElement>('remember-correction').disabled = !initialized || isBusy() || correctionSaving || composingInput !== null;
   for (const format of ['srt', 'vtt']) $<HTMLButtonElement>('export-' + format).disabled = disabled || !editor.segments.some(segment => segment.text.trim());
 }
@@ -578,8 +584,61 @@ function joinPcm(blocks: Float32Array[]): Float32Array {
   return out;
 }
 
+function keepAudio(token: number, audio: Float32Array | null): void {
+  if (!valid(token) || !audio || audio.length > MAX_KEPT_AUDIO) return;
+  lastAudio = { pcm: audio, historyId: currentHistoryId };
+  syncResultActions();
+}
+
+const retranscribeDialog = $<HTMLDialogElement>('retranscribe-dialog');
+const retranscribeModel = $<HTMLSelectElement>('retranscribe-model');
+const retranscribeLanguage = $<HTMLSelectElement>('retranscribe-language');
+function syncRetranscribeLanguage(): void {
+  const giga = retranscribeModel.value === 'gigaam';
+  retranscribeLanguage.disabled = giga;
+  $('retranscribe-language-note').textContent = giga ? 'GigaAM распознаёт только русскую речь.' : '';
+}
+
+async function retranscribe(): Promise<void> {
+  const audio = lastAudio;
+  if (!initialized || isBusy() || correctionSaving || !audio?.historyId || audio.historyId !== currentHistoryId || retranscribeDialog.open) return;
+  // Offer the other engine first: GigaAM for Russian Whisper users, Whisper for GigaAM users.
+  retranscribeModel.replaceChildren(...Array.from(form.querySelector<HTMLSelectElement>('[name="model"]')!.options, option => new Option(option.text, option.value)));
+  retranscribeLanguage.replaceChildren(...Array.from(form.querySelector<HTMLSelectElement>('[name="language"]')!.options, option => new Option(option.text, option.value)));
+  retranscribeModel.value = settings.model === 'gigaam' ? 'auto' : settings.language === 'ru' ? 'gigaam' : settings.model;
+  retranscribeLanguage.value = settings.language;
+  syncRetranscribeLanguage();
+  gesture.reset();
+  retranscribeDialog.returnValue = 'cancel';
+  const decision = new Promise<string>(resolve => retranscribeDialog.addEventListener('close', () => resolve(retranscribeDialog.returnValue), { once: true }));
+  retranscribeDialog.showModal();
+  if (await decision !== 'start' || isBusy() || lastAudio !== audio) return;
+  const options: Settings = { ...settings, model: retranscribeModel.value as Settings['model'], language: retranscribeLanguage.value, language2: '' };
+  const token = ++generation;
+  const previous = editor.snapshot();
+  setPhase('transcribing', 'Перераспознаём запись…');
+  try {
+    const text = processText(await asr.transcribe(audio.pcm, options, progress => messageProgress(progress, token)), settings);
+    if (!valid(token)) return;
+    if (!text) { setPhase('idle'); toast('Модель не нашла речь в записи. Текст не изменён.'); return; }
+    await api.updateHistory(audio.historyId, text);
+    history = history.map(item => item.id === audio.historyId ? { ...item, text } : item);
+    renderHistory();
+    if (!valid(token)) return;
+    lastResult = text;
+    showResult(text, 'Текст', `Перераспознано: ${modelName(options.model)}. Вставьте в нужное поле через Ctrl + Alt + V или скопируйте.`, true, { historyId: audio.historyId });
+    beforeProofread = previous;
+    setPhase('idle', 'Готово');
+  } catch (error) {
+    if (!valid(token) || (error instanceof Error && error.name === 'AbortError')) return;
+    restoreEditor();
+    setPhase('idle');
+    toast(`Не удалось перераспознать: ${friendlyError(error)} Текст не изменён.`, true);
+  }
+}
+
 async function start(target: string | null): Promise<void> {
-  if (!initialized || !canStart() || correctionDialog.open || correctionSaving) return;
+  if (!initialized || !canStart() || correctionDialog.open || correctionSaving || retranscribeDialog.open) return;
   const token = ++generation;
   const active: Session = {
     token, settings: { ...settings }, recorder: new Recorder(), target, enter: false, proofread: false,
@@ -587,6 +646,7 @@ async function start(target: string | null): Promise<void> {
     liveFailed: false, voiced: false, voicedTicks: 0, lastVoice: performance.now(), noise: .002,
   };
   session = active;
+  lastAudio = null;
   lastSeconds = 0;
   $('timer').textContent = '00:00';
   setPhase('starting');
@@ -651,15 +711,16 @@ async function finish(enter = false): Promise<void> {
       if (!valid(token)) return;
       if (!active.liveFailed) text = joinSegments(active.parts);
     }
-    if (!text && !active.liveUnavailable && active.pcm.length) {
-      text = await asr.transcribe(joinPcm(active.pcm), active.settings, progress => messageProgress(progress, token));
+    let audio: Float32Array | null = !active.liveUnavailable && active.pcm.length ? joinPcm(active.pcm) : null;
+    if (!text && audio) {
+      text = await asr.transcribe(audio, active.settings, progress => messageProgress(progress, token));
     } else if (!text && recording) {
       // The PCM tap is unavailable: fall back to decoding the compressed recording.
       const buffer = await recording.blob.arrayBuffer();
       if (!valid(token)) return;
-      const pcm = await decodeAudioTo16kMono(buffer);
+      audio = await decodeAudioTo16kMono(buffer);
       if (!valid(token)) return;
-      text = await asr.transcribe(pcm, active.settings, progress => messageProgress(progress, token));
+      text = await asr.transcribe(audio, active.settings, progress => messageProgress(progress, token));
     }
     if (!valid(token)) return;
     text = processText(text, active.settings);
@@ -686,6 +747,7 @@ async function finish(enter = false): Promise<void> {
         if (!valid(token)) return;
         // Preserve the recognized text, but do not insert a failed proofreading result.
         await complete(original, 'dictation', token, null, false);
+        keepAudio(token, audio);
         if (valid(token)) {
           const message = `Вычитка не выполнена: ${friendlyError(error)} Исходный текст сохранён в редакторе и буфере.`;
           $('result-note').textContent = message;
@@ -695,6 +757,7 @@ async function finish(enter = false): Promise<void> {
       }
     }
     await complete(text, 'dictation', token, active.proofread && active.proofreadMode==='review' ? null : active.target, active.proofread ? false : active.enter);
+    if (text) keepAudio(token, audio);
     if (valid(token) && originalForUndo !== null) {
       beforeProofread = { text: originalForUndo, segments: [], view: 'text' };
       if(review && active.proofreadMode==='review')showProofreadReview([{before:originalForUndo,result:review}]);
@@ -1347,6 +1410,8 @@ $('copy-result').addEventListener('click', () => void copyText(resultText.value)
 $('export-result').addEventListener('click', () => { void api.saveText(resultText.value).catch(error => toast(friendlyError(error), true)); });
 $('remember-correction').addEventListener('click', openCorrection);
 $('proofread-result').addEventListener('click', () => void proofreadEditor());
+$('retranscribe').addEventListener('click', () => void retranscribe());
+retranscribeModel.addEventListener('change', syncRetranscribeLanguage);
 $('llm-save-key').addEventListener('click', () => void saveLlmKey());
 $('llm-delete-key').addEventListener('click', () => void saveLlmKey(true));
 $('llm-fetch-models').addEventListener('click', () => void checkLlm(true));

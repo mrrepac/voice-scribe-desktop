@@ -35,6 +35,18 @@
       </div>
     </form>
   </dialog>
+  <dialog id="retranscribe-dialog" class="correction-dialog" aria-labelledby="retranscribe-title">
+    <form method="dialog">
+      <h2 id="retranscribe-title">Перераспознать запись</h2>
+      <p>Последняя диктовка хранится в памяти до следующей записи или выхода. Новый текст заменит её в истории; прежний можно будет вернуть.</p>
+      <label class="field">Модель<select id="retranscribe-model"></select></label>
+      <label class="field">Язык<select id="retranscribe-language"></select><small id="retranscribe-language-note"></small></label>
+      <div class="actions">
+        <button class="text-button" value="cancel">Отмена</button>
+        <button class="button" value="start">Распознать</button>
+      </div>
+    </form>
+  </dialog>
   <!-- TABLER_ICONS: generated from the official package at build time -->
   <header class="app-toolbar">
     <nav class="tabs" aria-label="Разделы приложения">
@@ -79,6 +91,7 @@
             <button class="text-button" id="remember-correction" title="Добавить исправление в ваш словарь" disabled>Запомнить исправление</button>
             <button class="text-button" id="proofread-result" disabled>Вычитать</button>
             <button class="text-button" id="undo-proofread" hidden>Вернуть исходный</button>
+            <button class="text-button" id="retranscribe" title="Распознать последнюю диктовку другой моделью или на другом языке" hidden>Перераспознать</button>
             <button class="icon-button" id="export-result" title="Сохранить текст в файл" aria-label="Сохранить текст в файл" disabled><svg aria-hidden="true"><use href="#i-download"/></svg></button>
             <button class="button button-small" id="copy-result" disabled><svg aria-hidden="true"><use href="#i-copy"/></svg>Копировать</button>
           </div>

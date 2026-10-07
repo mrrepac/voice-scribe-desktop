@@ -24,9 +24,15 @@ import { NativeRecovery } from './native-recovery';
 import { historySmokeTest } from './history-smoke';
 import { clipboardSmokeTest } from './clipboard-smoke';
 import { gigaamSmokeTest } from './gigaam-smoke';
+import { dictationSmokeTest } from './dictation-smoke';
 import { HOTKEYS, type Hotkey } from '../shared/hotkeys';
 
 const smoke = process.argv.includes('--smoke-test');
+// A fake microphone plays the Russian fixture once (see tests/gigaam-fixture.ps1).
+if(smoke && process.argv.includes('--dictation-test')){
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+  app.commandLine.appendSwitch('use-file-for-fake-audio-capture',path.join(process.cwd(),'artifacts','fixture-ru.wav')+'%noloop');
+}
 const root = app.getAppPath();
 if(smoke)app.setPath('userData',path.join(process.cwd(),'.data',app.isPackaged?'smoke-packaged':'smoke'));
 else if (!app.isPackaged) app.setPath('userData',path.join(root,'.data'));
@@ -496,6 +502,7 @@ async function smokeTest():Promise<void> {
     if(process.argv.includes('--history-test'))await historySmokeTest(win);
     const giga=process.argv.includes('--gigaam-test')?await gigaamSmokeTest(win):undefined;
     if(giga)console.log('GIGAAM_SMOKE',JSON.stringify(giga));
+    if(process.argv.includes('--dictation-test'))console.log('DICTATION_SMOKE',JSON.stringify(await dictationSmokeTest(win)));
     if(!bridge.ready)await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Native helper startup timeout')),10000);bridge.once('ready',()=>{clearTimeout(timer);resolve();});bridge.once('failure',message=>{clearTimeout(timer);reject(new Error(message));});});
     if(process.argv.includes('--clipboard-test'))await clipboardSmokeTest(win,bridge);
     const native=await bridge.request('diagnostics');
