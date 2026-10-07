@@ -4,6 +4,9 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 
+// Electron 44 does not download its runtime during npm install. This official
+// installer is idempotent and verifies the runtime matches the package version.
+execFileSync(process.execPath, ['node_modules/electron/install.js'], { stdio: 'inherit', windowsHide: true });
 await mkdir('dist/ort', { recursive: true });
 await build({entryPoints:['src/main/index.ts'],outfile:'dist/main.cjs',platform:'node',format:'cjs',bundle:true,external:['electron','electron-updater'],target:'node22'});
 await build({entryPoints:['src/main/diarization-worker.ts'],outfile:'dist/diarization-worker.cjs',platform:'node',format:'cjs',bundle:true,external:['sherpa-onnx-node'],target:'node22'});
