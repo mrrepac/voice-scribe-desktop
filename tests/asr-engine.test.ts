@@ -19,11 +19,11 @@ test('turbo reuses q4 files even when the GPU supports fp16', async t => {
   assert.deepEqual(plan.files,['onnx/encoder_model_q4.onnx','onnx/decoder_model_merged_q4.onnx']);
 });
 
-test('auto selects Turbo HQ on shader-f16 GPUs while small still uses fp16', async t => {
+test('auto selects q4 Turbo even on shader-f16 GPUs while small still uses fp16', async t => {
   gpu(t,true);
   const auto = await planDownload('auto','auto',() => {});
-  assert.equal(auto.model,'turbo-hq');
-  assert.equal(auto.files[0],'onnx/encoder_model_fp16.onnx');
+  assert.equal(auto.model,'turbo');
+  assert.equal(auto.files[0],'onnx/encoder_model_q4.onnx');
   const small = await planDownload('small','webgpu',() => {});
   assert.equal(small.files[0],'onnx/encoder_model_fp16.onnx');
 });
