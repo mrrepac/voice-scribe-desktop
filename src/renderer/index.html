@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co; worker-src 'self' blob:; media-src 'self' blob:;">
+  <title>Voice Scribe</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- TABLER_ICONS: generated from the official package at build time -->
+  <header class="app-toolbar">
+    <nav class="tabs" aria-label="Разделы приложения">
+      <button class="nav-item active" data-view="dictation" aria-current="page">Диктовка</button>
+      <button class="nav-item" data-view="history">История <span class="nav-count" id="history-count">0</span></button>
+      <button class="nav-item" data-view="settings">Настройки</button>
+    </nav>
+    <button class="icon-button" id="hide-window" title="Свернуть в трей" aria-label="Свернуть в трей"><svg aria-hidden="true"><use href="#i-tray"/></svg></button>
+  </header>
+  <main>
+    <aside id="update-notice" class="update-notice" hidden aria-label="Обновление приложения">
+      <span id="update-notice-text" role="status"></span>
+      <button id="update-notice-action" class="button button-small" type="button" hidden>Обновить</button>
+    </aside>
+    <span id="page-name" class="sr-only">Диктовка</span>
+    <section id="view-dictation" class="view" aria-label="Диктовка">
+      <div class="recorder" id="record-card">
+        <div class="record-controls">
+          <button class="record-button" id="record-button" aria-label="Записать"><svg id="record-icon" aria-hidden="true"><use href="#i-mic"/></svg><span id="record-button-label">Записать</span></button>
+          <button id="cancel-button" class="text-button cancel-button" hidden>Отменить <kbd>Esc</kbd></button>
+          <button class="text-button" id="pick-file"><svg aria-hidden="true"><use href="#i-file"/></svg>Открыть аудио</button>
+          <div class="record-meta">
+            <span class="status-tag" id="status-tag"><span aria-hidden="true"></span><span id="status-label" role="status" aria-live="polite" aria-atomic="true">Готово</span></span>
+            <span class="timer" id="timer" aria-label="Длительность записи">00:00</span>
+          </div>
+        </div>
+        <h2 id="record-title" class="sr-only">Диктовка</h2>
+        <p id="record-description" class="session-detail"></p>
+        <div class="waveform" id="waveform" aria-hidden="true"></div>
+        <div class="work-status" id="work-status" hidden>
+          <div class="work-heading"><span class="work-spinner" aria-hidden="true"></span><strong id="work-title">Обрабатываем аудио</strong><span id="work-percent"></span></div>
+          <progress id="work-progress" max="100" aria-label="Выполнение текущего этапа"></progress>
+          <div class="work-timing"><span id="work-elapsed"></span><span id="work-remaining">Оцениваем оставшееся время…</span></div>
+          <p>Можно свернуть окно. Результат появится после завершения.</p>
+        </div>
+      </div>
+      <div class="result-card" id="result-card">
+        <div class="section-row">
+          <div><h2 id="result-label">Текст</h2><span class="word-count" id="word-count">0 слов</span></div>
+          <div class="actions result-actions">
+            <button class="text-button" id="remember-correction" title="Добавить исправление в ваш словарь" disabled>Запомнить исправление</button>
+            <button class="text-button" id="proofread-result" disabled>Вычитать</button>
+            <button class="text-button" id="undo-proofread" hidden>Вернуть исходный</button>
+            <button class="icon-button" id="export-result" title="Сохранить текст в файл" aria-label="Сохранить текст в файл" disabled><svg aria-hidden="true"><use href="#i-download"/></svg></button>
+            <button class="button button-small" id="copy-result" disabled><svg aria-hidden="true"><use href="#i-copy"/></svg>Копировать</button>
+          </div>
+        </div>
+        <section id="proofread-review" class="proofread-review" aria-label="Изменения и замечания после вычитки" hidden></section>
+        <div class="transcript-toolbar" id="transcript-toolbar" hidden>
+          <div class="transcript-views" role="group" aria-label="Вид расшифровки">
+            <button class="text-button" id="result-view-segments" aria-pressed="true" aria-controls="transcript-segments">Таймкоды</button>
+            <button class="text-button" id="result-view-text" aria-pressed="false" aria-controls="result-text">Текст</button>
+          </div>
+          <span class="transcript-count" id="transcript-count"></span>
+          <div class="actions subtitle-actions" role="group" aria-label="Сохранить субтитры">
+            <button class="button button-small" id="export-srt" title="Сохранить субтитры SRT">SRT</button>
+            <button class="button button-small" id="export-vtt" title="Сохранить субтитры WebVTT">VTT</button>
+          </div>
+        </div>
+        <p class="transcript-name" id="transcript-name" hidden></p>
+        <textarea id="result-text" aria-label="Расшифрованный текст" placeholder="Текст появится после записи или открытия аудиофайла." spellcheck="true"></textarea>
+        <ol class="transcript-segments" id="transcript-segments" aria-label="Фрагменты с таймкодами" hidden></ol>
+        <p class="result-note transcript-help" id="transcript-help" hidden></p>
+        <p class="result-note" id="transcript-save" role="status" aria-live="polite"></p>
+        <p class="result-note" id="result-note"></p>
+      </div>
+      <div class="model-row">
+        <span id="engine-summary">Whisper · Авто</span>
+        <span id="setup-card"><button class="text-button" id="prepare-button"><svg aria-hidden="true"><use href="#i-download"/></svg>Подготовить</button></span>
+        <button class="text-button" data-go-settings>Настройки</button>
+      </div>
+      <footer class="dictation-footer"><kbd>Ctrl + Space</kbd><span>запись в любом приложении</span></footer>
+    </section>
+    <section id="view-history" class="view" aria-label="История" hidden>
+      <div class="history-toolbar">
+        <label class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="history-search" type="search" placeholder="Найти в расшифровках" aria-label="Найти в расшифровках"></label>
+        <button class="text-button" id="export-history">Экспорт</button>
+        <button class="text-button danger" id="clear-history">Очистить</button>
+      </div>
+      <div id="history-list"></div>
+      <div class="empty-state" id="history-empty">
+        <h2>История пуста</h2>
+        <p>Здесь появятся расшифровки.</p>
+        <button class="text-button" data-go-dictation>К диктовке</button>
+      </div>
+    </section>
+    <section id="view-settings" class="view" aria-label="Настройки" hidden>
+      <div class="settings-header"><span class="saved-label" id="settings-saved" role="status" aria-live="polite" aria-atomic="true">Сохраняются автоматически</span></div>
+      <p id="settings-busy" class="inline-notice" hidden>Настройки можно изменить после завершения записи или распознавания.</p>
+      <form id="settings-form">
+        <fieldset id="settings-fieldset">
+          <div class="settings-group">
+            <div class="group-heading"><h2>Распознавание</h2></div>
+            <div class="settings-grid">
+              <label class="field">Модель
+                <select name="model"><option value="auto">Авто · подобрать для этого ПК</option><option value="tiny">Tiny · ~40 МБ · самая быстрая</option><option value="base">Base · ~80 МБ · повседневная</option><option value="small">Small · ~250 МБ · точнее</option><option value="turbo">Turbo · ~720 МБ · максимальная точность</option></select>
+                <small>Размер зависит от устройства и формата весов.</small>
+              </label>
+              <label class="field">Вычисления
+                <select name="device"><option value="auto">Авто · GPU, если доступен</option><option value="webgpu">Видеокарта · WebGPU</option><option value="wasm">Процессор · WASM</option></select>
+                <small>При недоступной видеокарте используется процессор.</small>
+              </label>
+              <label class="field">Основной язык
+                <select name="language"><option value="ru">Русский</option><option value="en">English</option><option value="auto">Определять автоматически</option><option value="uk">Українська</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select>
+              </label>
+              <label class="field">Второй язык
+                <select name="language2"><option value="">Не используется</option><option value="en">English</option><option value="ru">Русский</option><option value="uk">Українська</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="es">Español</option></select>
+                <small>Для фраз, в которых вы переключаетесь между языками.</small>
+              </label>
+            </div>
+            <div class="toggle-row"><div><strong>Определять ораторов в аудиофайлах</strong><p>Метки «Оратор 1», «Оратор 2» в тексте и субтитрах. Первая загрузка — около 36 МБ; далее работает без интернета. До 2 часов аудио.</p></div><label class="switch"><input type="checkbox" name="diarization" aria-label="Определять ораторов в аудиофайлах"><span></span></label></div>
+            <div class="toggle-row"><div><strong>Предпросмотр по фразам</strong><p>Текст появляется в паузах. В поле вставляется один раз, после остановки.</p></div><label class="switch"><input type="checkbox" name="live" aria-label="Предпросмотр по фразам"><span></span></label></div>
+            <div class="toggle-row"><div><strong>Готовить модель при запуске</strong><p>Первый результат будет быстрее. Использует память компьютера.</p></div><label class="switch"><input type="checkbox" name="warmup" aria-label="Готовить модель при запуске"><span></span></label></div>
+          </div>
+          <div class="settings-group">
+            <div class="group-heading"><h2>Микрофон и диктовка</h2></div>
+            <div class="settings-grid">
+              <label class="field">Микрофон
+                <select name="microphone" id="microphone-select"><option value="">Системный по умолчанию</option></select>
+                <button type="button" class="text-button field-action" id="refresh-mics">Обновить список</button>
+              </label>
+              <label class="field">Останавливать после тишины
+                <select name="silenceSeconds"><option value="0">Только вручную</option><option value="2">2 секунды</option><option value="3">3 секунды</option><option value="5">5 секунд</option><option value="8">8 секунд</option></select>
+                <small>Запись без речи отменяется через 15 секунд.</small>
+              </label>
+            </div>
+            <div class="toggle-row"><div><strong>Голосовые знаки препинания</strong><p>Говорите «запятая», «точка», «новая строка», «новый абзац».</p></div><label class="switch"><input type="checkbox" name="voiceCommands" aria-label="Голосовые знаки препинания"><span></span></label></div>
+            <div class="toggle-row"><div><strong>Звуковые сигналы</strong><p>Короткий звук в начале записи и после готового результата.</p></div><label class="switch"><input type="checkbox" name="sounds" aria-label="Звуковые сигналы"><span></span></label></div>
+          </div>
+          <div class="settings-group">
+            <div class="group-heading"><h2>Вычитка через API</h2></div>
+            <div class="toggle-row"><div><strong>Подключить языковую модель</strong><p>По Ctrl + Shift + Space текст отправляется на указанный сервер для вычитки. Аудио не отправляется. Возможна оплата по тарифам провайдера.</p></div><label class="switch"><input type="checkbox" name="llmEnabled" aria-label="Вычитка через API"><span></span></label></div>
+            <div class="settings-grid">
+              <label class="field">Провайдер<select id="llm-provider"><option value="custom">Свой адрес</option></select><small>Выберите сервис, в котором получен ваш API-ключ. Ключи сохраняются отдельно для каждого адреса.</small></label>
+              <label class="field">Базовый адрес API<input name="llmBaseUrl" type="url" placeholder="https://api.openai.com/v1"><small>Совместимый с OpenAI Chat Completions API. Для локального сервера разрешён HTTP на localhost.</small></label>
+              <label class="field">Имя модели<input name="llmModel" type="text" placeholder="Имя модели у вашего провайдера" autocomplete="off"></label>
+              <label class="field">Модели провайдера<select id="llm-model-list" disabled><option value="">Сначала получите список</option></select><small>Выберите из списка или впишите точное имя вручную.</small></label>
+              <label class="field">API-ключ<input id="llm-api-key" type="password" autocomplete="off" placeholder="Для локального сервера может не требоваться"><small id="llm-key-status">Ключ хранится отдельно, в зашифрованном виде средствами Windows.</small></label>
+            </div>
+            <button class="button" id="llm-save-key" type="button">Сохранить ключ</button>
+            <button class="text-button" id="llm-delete-key" type="button">Удалить ключ</button>
+            <button class="button" id="llm-fetch-models" type="button">Получить модели</button>
+            <button class="button" id="llm-test" type="button">Проверить модель</button>
+            <p id="llm-connection-status" class="inline-notice" role="status">«Получить модели» проверяет каталог сервиса. «Проверить модель» отправляет короткий тестовый текст и может тарифицироваться.</p>
+          </div>
+          <div class="settings-group">
+            <div class="group-heading"><h2>Ваш словарь</h2></div>
+            <label class="field">Одна замена на строку<textarea name="replacements" rows="5" placeholder="обсидиан = Obsidian&#10;войс скрайб = Voice Scribe&#10;спб = Санкт-Петербург"></textarea><small>Слева: как распознаётся. Справа: как нужно написать. Пустая правая часть удаляет слово.</small></label>
+          </div>
+          <div class="settings-group">
+            <div class="group-heading"><h2>Приложение</h2></div>
+            <div class="toggle-row"><div><strong>Запускать вместе с Windows</strong><p>Voice Scribe появится в системном трее.</p></div><label class="switch"><input type="checkbox" name="startAtLogin" aria-label="Запускать вместе с Windows"><span></span></label></div>
+            <div class="settings-footnote">Интернет нужен для первой загрузки модели. Распознавание работает на этом компьютере.<p id="data-path"></p><small id="version">Voice Scribe</small></div>
+          </div>
+        </fieldset>
+      </form>
+      <section class="settings-group" aria-label="Обновления">
+        <div class="group-heading"><h2>Обновления</h2></div>
+        <p id="update-status" class="inline-notice" role="status">Проверяем доступность обновлений…</p>
+        <div class="actions">
+          <button id="update-check" class="button" type="button">Проверить обновления</button>
+          <button id="update-download" class="button" type="button" hidden>Скачать обновление</button>
+          <button id="update-install" class="button" type="button" hidden>Перезапустить и обновить</button>
+        </div>
+        <p class="settings-footnote">Новые версии загружаются в фоне. Установка — по вашей команде, после завершения записи и обработки. История, настройки и модели сохраняются.</p>
+      </section>
+      <details class="keyboard-note">
+        <summary>Сочетания клавиш <svg aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
+        <dl class="shortcut-list">
+          <div><dt><kbd>Ctrl + Space</kbd></dt><dd>Начать или завершить запись.</dd></div>
+          <div><dt>Удерживайте <kbd>Ctrl + Space</kbd></dt><dd>Диктуйте короткую фразу. Отпустите клавиши, чтобы завершить запись.</dd></div>
+          <div><dt><kbd>Ctrl + Shift + Space</kbd></dt><dd>В другом приложении — завершить диктовку, исправить текст по контексту и вставить без Enter и пометок. В Scribe — вычитать с показом изменений и сомнительных мест, без вставки во внешнее окно. Вне записи сочетание работает только в Scribe. Фразы с таймкодами вычитываются отдельно.</dd></div>
+          <div><dt><kbd>Esc</kbd></dt><dd>Отменить запись или распознавание.</dd></div>
+        </dl>
+      </details>
+    </section>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </main>
+  <dialog id="correction-dialog" class="correction-dialog" aria-labelledby="correction-title" aria-describedby="correction-description">
+    <form id="correction-form">
+      <h2 id="correction-title">Запомнить исправление</h2>
+      <p id="correction-description">Проверьте замену. Она применится к следующим расшифровкам. Текущий текст можно исправить в редакторе.</p>
+      <label class="field" for="correction-from">Распознано
+        <input id="correction-from" type="text" required autocomplete="off" spellcheck="false" placeholder="войс скрайб">
+      </label>
+      <label class="field" for="correction-to">Писать как
+        <input id="correction-to" type="text" required autocomplete="off" spellcheck="false" placeholder="Voice Scribe">
+      </label>
+      <p id="correction-error" class="correction-error" role="alert" hidden></p>
+      <div class="correction-actions">
+        <button type="button" class="text-button" id="correction-dictionary">Открыть словарь</button>
+        <button type="button" class="button" id="correction-cancel">Отмена</button>
+        <button type="submit" class="record-button" id="correction-save">Запомнить</button>
+      </div>
+    </form>
+  </dialog>
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

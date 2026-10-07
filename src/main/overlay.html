@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'">
+  <style>
+    :root { color-scheme: light dark; --surface: #f6f6f6; --text: #242424; --muted: #626262; --accent: #404040; --line: #979797; --danger: #b42318; }
+    @media (prefers-color-scheme: dark) {
+      :root { --surface: #282828; --text: #eeeeee; --muted: #b2b2b2; --accent: #dedede; --line: #777777; --danger: #ff9f95; }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: transparent; color: var(--text); font: 13px "Segoe UI Variable Text", "Segoe UI", sans-serif; }
+    .pill { height: 72px; margin: 8px; display: flex; align-items: center; gap: 14px; padding: 14px 18px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+    .content { flex: 1; min-width: 0; }
+    #message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .meta { color: var(--muted); font-size: 11px; margin-top: 5px; }
+    .signal { width: 46px; flex-shrink: 0; }
+    #elapsed { color: var(--muted); font: 12px Consolas, monospace; font-variant-numeric: tabular-nums; }
+    #meter { margin-top: 8px; width: 44px; height: 3px; border-radius: 3px; background: var(--accent); transform-origin: left; transform: scaleX(.05); }
+    [data-phase="error"] .dot, [data-phase="recording"] .dot { background: var(--danger); }
+    .pill { position: relative; overflow: hidden; }
+    .signal { width: 78px; text-align: right; }
+    #elapsed { font-size: 11px; white-space: nowrap; }
+    #meter { margin-left: auto; }
+    #progress { position: absolute; bottom: 0; left: 0; width: 100%; height: 3px; margin: 0; accent-color: var(--accent); }
+    [data-phase="transcribing"] .dot, [data-phase="preparing"] .dot { width: 14px; height: 14px; background: transparent; border: 2px solid var(--line); border-top-color: var(--accent); }
+    @media (prefers-reduced-motion: no-preference) { [data-phase="transcribing"] .dot, [data-phase="preparing"] .dot { animation: spin 1s linear infinite; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="pill" id="pill">
+    <div class="dot"></div>
+    <div class="content"><div id="message">Voice Scribe</div><div class="meta" id="hint">Ctrl + Space · начать запись</div></div>
+    <div class="signal"><div id="elapsed">00:00</div><div id="meter"></div></div>
+    <progress id="progress" max="100" hidden aria-label="Выполнение текущего этапа"></progress>
+  </div>
+  <script>
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    window.overlay.onStatus(status => {
+      const message = document.getElementById('message');
+      if (message.textContent !== status.message) message.textContent = status.message;
+      document.getElementById('pill').dataset.phase = status.phase;
+      const seconds = Math.max(0, Math.floor(status.seconds || 0));
+      const format = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+      const working = status.phase === 'transcribing' || status.phase === 'preparing';
+      document.getElementById('elapsed').textContent = (working ? 'Прошло ' : '') + format(seconds);
+      document.getElementById('hint').textContent = status.phase === 'recording' ? 'Ctrl + Space · завершить   Esc · отменить' : status.phase === 'idle' || status.phase === 'error' ? 'Ctrl + Space · начать запись' : 'Esc · отменить';
+      document.getElementById('meter').style.transform = 'scaleX(' + (reducedMotion.matches ? .5 : Math.max(.05, Math.min(1, (status.level || 0) * 5))) + ')';
+      document.getElementById('meter').hidden = working;
+      const progress = document.getElementById('progress');
+      progress.hidden = !working;
+      if (working) {
+        if (status.progress > 0) progress.value = status.progress; else progress.removeAttribute('value');
+        const percent = status.progress === undefined ? '' : Math.floor(status.progress) + '% · ';
+        document.getElementById('hint').textContent = percent + (status.remainingSeconds === undefined ? 'Оцениваем время' : 'До конца этапа ≈ ' + format(status.remainingSeconds)) + ' · Esc отменить';
+      }
+    });
+  </script>
+</body>
+</html>

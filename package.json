@@ -1,0 +1,99 @@
+{
+  "name": "voice-scribe-desktop",
+  "productName": "Voice Scribe",
+  "version": "0.2.0",
+  "description": "Локальная голосовая диктовка в любое приложение Windows",
+  "author": "mrrepac",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "start": "npm run build && electron .",
+    "test": "node scripts/test.mjs",
+    "pack": "npm run build && electron-builder --win --dir",
+    "dist": "npm run build && electron-builder --win nsis --publish never",
+    "dist:portable": "npm run build && electron-builder --win portable --publish never"
+  },
+  "devDependencies": {
+    "@huggingface/transformers": "3.8.1",
+    "@tabler/icons": "3.49.0",
+    "@types/node": "^24.0.0",
+    "electron": "44.6.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.voicescribe.desktop",
+    "productName": "Voice Scribe",
+    "electronDist": "node_modules/electron/dist",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "!dist/smoke.js",
+      "!dist/fixture.wav",
+      "package.json",
+      "LICENSE",
+      "README.md",
+      "THIRD_PARTY_NOTICES.md",
+      "licenses/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "native/bin",
+        "to": "native",
+        "filter": [
+          "*.exe",
+          "*.config"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico",
+      "signExecutable": false
+    },
+    "artifactName": "Voice-Scribe-${version}-${arch}.${ext}",
+    "asarUnpack": [
+      "node_modules/sherpa-onnx-*/**/*"
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Voice-Scribe-Setup-${version}-${arch}.${ext}",
+      "include": "build/installer.nsh",
+      "installerLanguages": [
+        "ru_RU",
+        "en_US"
+      ],
+      "language": "1049"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "mrrepac",
+      "repo": "voice-scribe-desktop",
+      "releaseType": "release"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "6.8.10",
+    "sherpa-onnx-node": "1.13.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mrrepac/voice-scribe-desktop.git"
+  },
+  "homepage": "https://github.com/mrrepac/voice-scribe-desktop"
+}

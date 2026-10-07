@@ -1,0 +1,10 @@
+node_modules/
+dist/
+release/
+.data/
+.test-build/
+native/bin/
+artifacts/
+*.log
+.npm-cache/
+tests/asr-generated/
