@@ -28,6 +28,7 @@ import { gigaamSmokeTest } from './gigaam-smoke';
 import { dictationSmokeTest, profileSmokeTest } from './dictation-smoke';
 import { playbackSmokeTest } from './playback-smoke';
 import { HOTKEYS, type Hotkey } from '../shared/hotkeys';
+import { effectiveModel } from '../shared/models';
 
 const smoke = process.argv.includes('--smoke-test');
 // A fake microphone plays the Russian fixture once (see tests/gigaam-fixture.ps1).
@@ -204,7 +205,7 @@ function setupIpc():void {
     if(saved.hotkey!==hotkey)applyHotkey(saved.hotkey);
     applySelection(saved);
     // Free GigaAM's memory once another model is chosen.
-    if(saved.model!=='gigaam')gigaam.cancel();
+    if(effectiveModel(saved)!=='gigaam')gigaam.cancel();
     if(app.isPackaged && !smoke) app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,args:['--hidden']});
     return saved;
   });

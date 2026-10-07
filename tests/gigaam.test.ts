@@ -81,3 +81,18 @@ test('the recognizer routes GigaAM to the bridge and Whisper to the worker clien
   recognizer.cancel();
   assert.deepEqual(calls, ['giga-prepare', 'giga-false', 'giga-true', 'whisper-run', 'whisper-cancel', 'giga-cancel']);
 });
+
+test('Auto picks GigaAM for Russian only and can be kept on Whisper', async () => {
+  const used: string[] = [];
+  const bridge = {
+    prepareGigaam: async () => {}, cancelGigaam: async () => {}, onGigaamProgress: () => () => {},
+    recognizeGigaam: async () => { used.push('gigaam'); return { text: 'Привет.', segments: [] }; },
+  };
+  const whisper = { transcribe: async (_pcm: Float32Array, options: { model: string }) => { used.push(options.model); return 'hello'; } } as unknown as AsrClient;
+  const recognizer = new Recognizer(bridge, whisper);
+  const speech = new Float32Array(16000).map((_, i) => 0.3 * Math.sin(i / 4));
+  const auto = { model: 'auto', device: 'auto', language: 'ru', language2: '' } as const;
+  for (const options of [auto, { ...auto, language2: 'ru' }, { ...auto, language: 'en' }, { ...auto, language: 'auto' }, { ...auto, language2: 'en' }, { ...auto, model: 'small' }, { ...auto, autoGigaam: false }] as const)
+    await recognizer.transcribe(speech, options);
+  assert.deepEqual(used, ['gigaam', 'gigaam', 'auto', 'auto', 'auto', 'small', 'auto']);
+});

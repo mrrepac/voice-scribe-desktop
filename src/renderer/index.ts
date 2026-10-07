@@ -16,7 +16,7 @@ import { PROVIDERS, providerFor } from '../shared/providers';
 import { renderReview, type ReviewBlock } from './proofread-review';
 import { keepSurroundingSpace, type ProofreadResult, type ProofreadMode } from '../shared/proofread';
 import { WorkProgress } from '../shared/work-progress';
-import type { ModelEntry } from '../shared/models';
+import { effectiveModel, type ModelEntry } from '../shared/models';
 import { applyProfile, findProfile, normalizeApp, type AppProfile } from '../shared/profiles';
 import type { UpdateState } from '../shared/updates';
 import { HOTKEYS } from '../shared/hotkeys';
@@ -190,7 +190,7 @@ const canStart = () => !historyClearing && (['idle', 'error'].includes(phase) ||
 const valid = (token: number) => token === generation;
 const modelName = (model: Settings['model']) => model === 'auto' ? 'Авто' : model === 'turbo-hq' ? 'Turbo HQ' : model === 'gigaam' ? 'GigaAM v3' : model[0].toUpperCase() + model.slice(1);
 /** GigaAM recognizes Russian only; the language settings apply to Whisper. */
-const engineSummary = (value: Settings) => value.model === 'gigaam' ? 'GigaAM v3 · только русский' : `Whisper · ${modelName(value.model)} · ${value.language === 'auto' ? 'Автоязык' : value.language.toUpperCase()}`;
+const engineSummary = (value: Settings) => effectiveModel(value) === 'gigaam' ? `${value.model === 'auto' ? 'Авто · ' : ''}GigaAM v3 · только русский` : `Whisper · ${modelName(value.model)} · ${value.language === 'auto' ? 'Автоязык' : value.language.toUpperCase()}`;
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
 
 function toast(message: string, error = false): void {
@@ -668,7 +668,8 @@ async function retranscribe(): Promise<void> {
   // Offer the other engine first: GigaAM for Russian Whisper users, Whisper for GigaAM users.
   retranscribeModel.replaceChildren(...Array.from(form.querySelector<HTMLSelectElement>('[name="model"]')!.options, option => new Option(option.text, option.value)));
   retranscribeLanguage.replaceChildren(...Array.from(form.querySelector<HTMLSelectElement>('[name="language"]')!.options, option => new Option(option.text, option.value)));
-  retranscribeModel.value = settings.model === 'gigaam' ? 'auto' : settings.language === 'ru' ? 'gigaam' : settings.model;
+  for (const option of retranscribeModel.options) if (option.value === 'auto') option.text = 'Авто · Whisper, подобрать для этого ПК';
+  retranscribeModel.value = effectiveModel(settings) === 'gigaam' ? 'auto' : settings.language === 'ru' ? 'gigaam' : settings.model;
   retranscribeLanguage.value = settings.language;
   syncRetranscribeLanguage();
   gesture.reset();
@@ -676,7 +677,7 @@ async function retranscribe(): Promise<void> {
   const decision = new Promise<string>(resolve => retranscribeDialog.addEventListener('close', () => resolve(retranscribeDialog.returnValue), { once: true }));
   retranscribeDialog.showModal();
   if (await decision !== 'start' || isBusy() || lastAudio !== audio) return;
-  const options: Settings = { ...settings, model: retranscribeModel.value as Settings['model'], language: retranscribeLanguage.value, language2: '' };
+  const options = { ...settings, model: retranscribeModel.value as Settings['model'], language: retranscribeLanguage.value, language2: '', autoGigaam: false };
   const token = ++generation;
   const previous = editor.snapshot();
   setPhase('transcribing', 'Перераспознаём запись…');
