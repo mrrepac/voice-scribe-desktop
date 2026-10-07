@@ -89,6 +89,16 @@ test('external proofreading uses contextual plain text and never creates review 
   };
   assert.deepEqual(await proofread('готовый текст',settings,'key',signal(),request,'plain'),{text:'Готовый текст.',issues:[],reviewed:false});
 });
+test('selected text is proofread as written text, not as a speech transcript',async()=>{
+  const request: typeof fetch=async(_url,options)=>{
+    const body=JSON.parse(String(options?.body));
+    assert.doesNotMatch(body.messages[0].content,/распознавания/);
+    assert.match(body.messages[0].content,/переносы строк/);
+    assert.equal(body.messages[1].content,'превет\n');
+    return new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content:'Привет.'}}]}));
+  };
+  assert.deepEqual(await proofread('превет\n',settings,'key',signal(),request,'selection'),{text:'Привет.',issues:[],reviewed:false});
+});
 test('internal proofreading requests structured uncertainty review',async()=>{
   const request: typeof fetch=async(_url,options)=>{
     const body=JSON.parse(String(options?.body));

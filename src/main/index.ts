@@ -48,6 +48,7 @@ let deliveryQueue:Promise<unknown>=Promise.resolve();
 let deliveryGeneration=0;
 let lastStatus:Status={phase:'idle',message:'Готов к диктовке'};
 let hotkey:Hotkey='ctrl-space';
+let noticeTimer:NodeJS.Timeout|undefined;
 const bridge=new NativeBridge();
 const nativeRecovery=new NativeRecovery(bridge,app.isPackaged?path.join(process.resourcesPath,'native/VoiceScribe.Native.exe'):path.join(root,'native/bin/VoiceScribe.Native.exe'),state=>{
   if(win && !win.isDestroyed())win.webContents.send('native:health',state);
@@ -85,6 +86,15 @@ function applyHotkey(value:Hotkey):void {
   if(bridge.ready)void bridge.request('set-hotkey',{hotkey}).catch(error=>console.error('Hotkey change failed',error));
   if(lastStatus.phase==='idle')tray?.setToolTip(`Voice Scribe · ${HOTKEYS[hotkey].label}`);
   if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:HOTKEYS[hotkey].label});
+}
+// Ctrl+Shift+Space in another application proofreads its selection only when proofreading can run.
+function applySelection(settings:{llmEnabled:boolean;llmModel:string}):void {
+  if(bridge.ready)void bridge.request('set-selection',{enabled:settings.llmEnabled && settings.llmModel.trim()!==''}).catch(error=>console.error('Selection shortcut change failed',error));
+}
+function showOverlay():void {
+  const area=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  overlay.setPosition(Math.round(area.x+(area.width-430)/2),area.y+area.height-112);
+  overlay.showInactive();
 }
 function makeTray():void {
   const icon=nativeImage.createFromPath(path.join(root,'dist/icon.png')).resize({width:24,height:24});
@@ -179,7 +189,7 @@ function setupIpc():void {
     finally {clearTimeout(timer);if(proofreadController===controller)proofreadController=null;}
   });
   handle('llm:proofread',async(value,mode='review')=>{
-    if(mode!=='plain' && mode!=='review')throw new Error('Неизвестный режим вычитки.');
+    if(mode!=='plain' && mode!=='review' && mode!=='selection')throw new Error('Неизвестный режим вычитки.');
     if(proofreadController)throw new Error('Вычитка уже выполняется.');
     const controller=new AbortController();
     proofreadController=controller;
@@ -192,6 +202,7 @@ function setupIpc():void {
     await apiKeys.migrate((await storage.settings()).llmBaseUrl);
     const saved=await storage.saveSettings(value);
     if(saved.hotkey!==hotkey)applyHotkey(saved.hotkey);
+    applySelection(saved);
     // Free GigaAM's memory once another model is chosen.
     if(saved.model!=='gigaam')gigaam.cancel();
     if(app.isPackaged && !smoke) app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,args:['--hidden']});
@@ -255,6 +266,24 @@ function setupIpc():void {
     deliveryQueue=run.catch(()=>{});
     return run;
   });
+  // Copies the selection of another window with Ctrl+C and puts the previous clipboard back.
+  handle('selection:copy',target=>{
+    if(typeof target!=='string' || !/^[1-9]\d*$/.test(target) || target===ownWindowId())throw new Error('Окно с выделенным текстом недоступно.');
+    const run=deliveryQueue.then(async()=>{
+      if(!bridge.ready)throw new Error('Служба горячих клавиш пока недоступна.');
+      let previous:ClipboardItem[]|null=null;
+      try{previous=await snapshotClipboard();}catch(error){console.error('Clipboard snapshot failed',error);}
+      const result=await bridge.request('copy-selection',{target});
+      const copied=result?.status==='copied';
+      const text=copied ? await clipboard.readText() : '';
+      // A cancelled copy may still have reached the application after Ctrl+C was sent.
+      if(previous && (copied || result?.sent===true)){try{await restoreClipboard(previous);}catch(error){console.error('Clipboard restore failed',error);}}
+      if(!copied)return {text:null,reason:typeof result?.reason==='string'?result.reason:'nothing-copied'};
+      return text.trim() ? {text} : {text:null,reason:'not-text'};
+    });
+    deliveryQueue=run.catch(()=>{});
+    return run;
+  });
   handle('text:save',async text=>{
     const value=textArg(text);
     const result=await dialog.showSaveDialog(win,{title:'Сохранить расшифровку',defaultPath:`voice-${new Date().toISOString().slice(0,10)}.txt`,filters:[{name:'Текст',extensions:['txt']},{name:'Markdown',extensions:['md']}]});
@@ -305,6 +334,13 @@ function setupIpc():void {
   handle('native:health',()=>nativeRecovery.state);
   handle('native:restart',()=>{if(active())throw new Error('Дождитесь завершения записи или обработки');nativeRecovery.restart();});
   ipcMain.on('hide',event=>{if(event.sender===win.webContents)win.hide();});
+  ipcMain.on('notice',(event,message,error)=>{
+    if(event.sender!==win.webContents || typeof message!=='string' || smoke || active() || win.isFocused() || !overlay || overlay.isDestroyed())return;
+    overlay.webContents.send('status',{phase:error===true?'error':'idle',message:message.slice(0,250),notice:true});
+    showOverlay();
+    clearTimeout(noticeTimer);
+    noticeTimer=setTimeout(()=>{if(!active())overlay?.hide();},error===true?6000:3000);
+  });
   ipcMain.on('status',(event,status:Status)=>{
     if(event.sender!==win.webContents || !status || !['idle','starting','recording','transcribing','preparing','error'].includes(status.phase))return;
     const changed=status.phase!==lastStatus.phase;
@@ -315,11 +351,9 @@ function setupIpc():void {
     lastStatus={phase:status.phase,message:String(status.message).slice(0,250),seconds:status.seconds,level:status.level,progress:status.progress,remainingSeconds:status.remainingSeconds};
     if(changed){refreshTray();if(bridge.ready)void bridge.request('set-active',{active:active()}).catch(()=>{});}
     tray?.setToolTip(`Voice Scribe · ${lastStatus.message}`.slice(0,120));
-    if(!smoke && active() && !win.isFocused()){
-      const area=screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-      overlay.setPosition(Math.round(area.x+(area.width-430)/2),area.y+area.height-112);
-      overlay.showInactive();
-    }else overlay?.hide();
+    clearTimeout(noticeTimer);
+    if(!smoke && active() && !win.isFocused())showOverlay();
+    else overlay?.hide();
     if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:HOTKEYS[hotkey].label});
   });
 }
@@ -558,12 +592,12 @@ else {
     bridge.on('hotkey',event=>{
       if(!win || win.isDestroyed())return;
       const own=event.target===ownWindowId();
-      if(event.action==='proofread'){send({action:'proofread',mode:own?'review':'plain'});return;}
+      if(event.action==='proofread'){send(own?{action:'proofread',mode:'review'}:{action:'proofread',mode:'plain',target:event.target});return;}
       if(event.action==='dictation-down' && own)event={...event,target:''};
       send(event as Command);
     });
     // A restarted helper starts with the default shortcut; reapply the saved one.
-    bridge.on('ready',()=>{configureNativeWindow();applyHotkey(hotkey);void bridge.request('set-active',{active:active()}).catch(()=>{});});
+    bridge.on('ready',()=>{configureNativeWindow();applyHotkey(hotkey);void storage.settings().then(applySelection,()=>{});void bridge.request('set-active',{active:active()}).catch(()=>{});});
     hotkey=(await storage.settings().catch(()=>null))?.hotkey ?? hotkey;
     nativeRecovery.restart();
     await createWindows(); configureNativeWindow(); makeTray();

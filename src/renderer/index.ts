@@ -14,7 +14,7 @@ import { assignSpeakers } from '../shared/speakers';
 import { inferCorrection } from '../shared/corrections';
 import { PROVIDERS, providerFor } from '../shared/providers';
 import { renderReview, type ReviewBlock } from './proofread-review';
-import type { ProofreadResult, ProofreadMode } from '../shared/proofread';
+import { keepSurroundingSpace, type ProofreadResult, type ProofreadMode } from '../shared/proofread';
 import { WorkProgress } from '../shared/work-progress';
 import type { ModelEntry } from '../shared/models';
 import { applyProfile, findProfile, normalizeApp, type AppProfile } from '../shared/profiles';
@@ -1055,6 +1055,64 @@ async function proofreadEditor(): Promise<void> {
   }
 }
 
+const selectionReasons: Record<string, string> = {
+  'nothing-copied': 'Выделите текст и нажмите сочетание ещё раз.',
+  'not-text': 'В выделении нет текста.',
+  'target-changed': 'Активное окно изменилось.',
+  'modifiers-held': 'Отпустите Ctrl и Shift сразу после нажатия.',
+  'input-blocked': 'Windows или приложение заблокировали копирование.',
+};
+
+// The window is usually hidden while another application is in front: also show the result in the overlay.
+function selectionNotice(message: string, error = false): void {
+  toast(message, error);
+  api.notice(message, error);
+}
+
+/** Ctrl+Shift+Space outside Voice Scribe: copy the selection, proofread it and paste the result over it. */
+async function proofreadSelection(target: string): Promise<void> {
+  if (!initialized || isBusy() || correctionDialog.open || correctionSaving) return;
+  const token = ++generation;
+  setPhase('transcribing', 'Копируем выделенный текст…');
+  try {
+    flushSettingsSave();
+    await saving;
+    if (!valid(token)) return;
+    await api.saveSettings(settings);
+    if (!valid(token)) return;
+    const copied = await api.copySelection(target);
+    if (!valid(token)) return;
+    if (copied.text === null) {
+      setPhase('idle');
+      selectionNotice(`Выделенный текст не скопирован. ${selectionReasons[copied.reason ?? ''] ?? selectionReasons['nothing-copied']}`, true);
+      return;
+    }
+    if (copied.text.length > 50000) {
+      setPhase('idle');
+      selectionNotice('Для вычитки доступно до 50 000 символов за раз.', true);
+      return;
+    }
+    setPhase('transcribing', 'Вычитываем выделенный текст…');
+    const result = await api.proofread(copied.text, 'selection');
+    if (!valid(token)) return;
+    const corrected = keepSurroundingSpace(copied.text, result.text);
+    if (corrected === copied.text) {
+      setPhase('idle', 'Вычитка завершена');
+      selectionNotice('Ошибок не найдено. Текст не изменён.');
+      return;
+    }
+    setPhase('transcribing', 'Заменяем выделенный текст…');
+    const delivery = await api.deliver(corrected, target, false);
+    if (!valid(token)) return;
+    setPhase('idle', 'Вычитка завершена');
+    selectionNotice(delivery.status === 'inserted' ? 'Выделенный текст исправлен.' : deliveryMessage(delivery, true, false), delivery.status !== 'inserted');
+  } catch (error) {
+    if (!valid(token)) return;
+    setPhase('idle');
+    selectionNotice(`Вычитка не выполнена: ${friendlyError(error)} Текст не изменён.`, true);
+  }
+}
+
 async function saveLlmKey(remove = false): Promise<void> {
   const input = $<HTMLInputElement>('llm-api-key');
   if (!remove && !input.value.trim()) { toast('Введите API-ключ.', true); return; }
@@ -1155,7 +1213,8 @@ async function handleCommand(command: Command): Promise<void> {
         session.enter = false;
         gesture.reset();
         await finish();
-      } else if (!isBusy() && command.mode !== 'plain') await proofreadEditor();
+      } else if (!isBusy() && command.target) await proofreadSelection(command.target);
+      else if (!isBusy() && command.mode !== 'plain') await proofreadEditor();
       break;
     case 'cancel': cancel(); break;
     case 'show-history': navigate('history'); break;

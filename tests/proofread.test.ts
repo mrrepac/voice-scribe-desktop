@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { diffText, parseProofreadResult } from '../src/shared/proofread';
+import { diffText, keepSurroundingSpace, parseProofreadResult } from '../src/shared/proofread';
 
 test('diff preserves both exact texts, including punctuation, whitespace and Unicode',()=>{
   for(const [before,after] of [['превет мир','Привет, мир!'],['a a b','a b b'],['','text'],['text',''],['без изменений','без изменений'],['🙂 ёж\n\nпришол','🙂 Ёж\n\nпришёл.'],['one\t two','one two'],['a '.repeat(2000),'b '.repeat(2000)]]) {
@@ -8,6 +8,11 @@ test('diff preserves both exact texts, including punctuation, whitespace and Uni
     assert.equal(parts.filter(p=>p.kind!=='add').map(p=>p.text).join(''),before);
     assert.equal(parts.filter(p=>p.kind!=='remove').map(p=>p.text).join(''),after);
   }
+});
+test('a corrected selection keeps the line breaks and spaces around it',()=>{
+  assert.equal(keepSurroundingSpace('  превет мир\r\n','Привет, мир!'),'  Привет, мир!\r\n');
+  assert.equal(keepSurroundingSpace('текст',' Текст. '),'Текст.');
+  assert.equal(keepSurroundingSpace('\n\n','Текст'),'\n\nТекст');
 });
 test('structured review keeps only issues anchored in the corrected text',()=>{
   const result=parseProofreadResult(JSON.stringify({text:'Встреча с Сашей в пятницу.',issues:[{quote:'Сашей',reason:'Уточните имя.'},{quote:'несуществующий текст',reason:'Неясно.'}]}));

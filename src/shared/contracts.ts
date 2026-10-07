@@ -31,7 +31,8 @@ export type Command =
   | { action: 'dictation-abort' }
   | { action: 'toggle'; target?: string }
   | { action: 'cancel' | 'finish-enter' | 'show-history' }
-  | { action: 'proofread'; mode?: import('./proofread').ProofreadMode }
+  /** target: the other application's window whose selection is proofread when nothing is being dictated. */
+  | { action: 'proofread'; mode?: import('./proofread').ProofreadMode; target?: string }
   | { action: 'paste-last'; target: string }
   | { action: 'bridge-error'; message: string };
 export interface Delivery { status: 'inserted' | 'clipboard-only'; reason?: string; entered?: boolean; restored?: boolean; }
@@ -58,6 +59,8 @@ export interface ScribeAPI {
   exportHistory(): Promise<boolean>;
   deliver(text: string, target: string | null, enter: boolean): Promise<Delivery>;
   copy(text: string): Promise<void>;
+  /** Copies the selection of another window; text is null when nothing was copied. */
+  copySelection(target: string): Promise<{ text: string | null; reason?: string }>;
   saveText(text: string): Promise<boolean>;
   saveSubtitles(segments: TranscriptSegment[], format: SubtitleFormat, name?: string): Promise<boolean>;
   diarize(pcm: Float32Array, speakerCount?: number): Promise<SpeakerTurn[]>;
@@ -80,6 +83,8 @@ export interface ScribeAPI {
   diarizeAudio(id: string, speakerCount?: number): Promise<SpeakerTurn[]>;
   status(value: Status): void;
   hide(): void;
+  /** Briefly shows a message in the overlay while another application is in front. */
+  notice(message: string, error?: boolean): void;
   onCommand(handler: (command: Command) => void): () => void;
   cacheHas(key: string): Promise<boolean>;
   cachePut(key: string, data: ArrayBuffer): Promise<void>;

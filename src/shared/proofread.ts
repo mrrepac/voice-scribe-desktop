@@ -1,5 +1,6 @@
 export interface ReviewIssue { quote: string; reason: string; }
-export type ProofreadMode = 'plain' | 'review';
+/** plain: dictated text; selection: text selected in another application; review: with a report. */
+export type ProofreadMode = 'plain' | 'review' | 'selection';
 export interface ProofreadResult { text: string; issues: ReviewIssue[]; reviewed: boolean; }
 
 export function parseProofreadResult(raw: string): ProofreadResult {
@@ -22,6 +23,12 @@ export function parseProofreadResult(raw: string): ProofreadResult {
   }
   if (data.issues.length > 100) reviewed = false;
   return {text,issues,reviewed};
+}
+
+/** Puts the selection's leading and trailing whitespace (such as a final line break) back around the corrected text. */
+export function keepSurroundingSpace(original: string, corrected: string): string {
+  const lead = /^\s*/.exec(original)![0], trail = original.slice(lead.length).match(/\s*$/)![0];
+  return lead + corrected.trim() + trail;
 }
 
 export interface DiffPart { kind: 'same' | 'remove' | 'add'; text: string; }

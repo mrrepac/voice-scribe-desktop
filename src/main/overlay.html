@@ -14,6 +14,9 @@
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
     .content { flex: 1; min-width: 0; }
     #message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    /* Notices may need two lines; they have no hint or timer. */
+    [data-notice] #message { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    [data-notice] .meta, [data-notice] .signal { display: none; }
     .meta { color: var(--muted); font-size: 11px; margin-top: 5px; }
     .signal { width: 46px; flex-shrink: 0; }
     #elapsed { color: var(--muted); font: 12px Consolas, monospace; font-variant-numeric: tabular-nums; }
@@ -47,6 +50,7 @@
       const working = status.phase === 'transcribing' || status.phase === 'preparing';
       document.getElementById('elapsed').textContent = (working ? 'Прошло ' : '') + format(seconds);
       const keys = status.hotkey || 'Ctrl + Space';
+      document.getElementById('pill').toggleAttribute('data-notice', status.notice === true);
       document.getElementById('hint').textContent = status.phase === 'recording' ? keys + ' · завершить   Esc · отменить' : status.phase === 'idle' || status.phase === 'error' ? keys + ' · начать запись' : 'Esc · отменить';
       document.getElementById('meter').style.transform = 'scaleX(' + (reducedMotion.matches ? .5 : Math.max(.05, Math.min(1, (status.level || 0) * 5))) + ')';
       document.getElementById('meter').hidden = working;
