@@ -176,7 +176,7 @@ let warming = false;
 const isBusy = () => historyClearing || !['idle', 'error'].includes(phase);
 const canStart = () => !historyClearing && (['idle', 'error'].includes(phase) || (phase === 'preparing' && warming));
 const valid = (token: number) => token === generation;
-const modelName = (model: Settings['model']) => model === 'auto' ? 'Авто' : model[0].toUpperCase() + model.slice(1);
+const modelName = (model: Settings['model']) => model === 'auto' ? 'Авто' : model === 'turbo-hq' ? 'Turbo HQ' : model[0].toUpperCase() + model.slice(1);
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
 
 function toast(message: string, error = false): void {
@@ -727,7 +727,9 @@ async function prepare(): Promise<void> {
     const loaded = await asr.prepare(settings, progress => messageProgress(progress, token));
     // A dictation started during warmup supersedes the token, but the model is still ready.
     $('setup-card').hidden = true;
-    $('engine-summary').textContent = `${modelName(loaded.model)} · ${loaded.device === 'webgpu' ? 'Видеокарта' : 'Процессор'}`;
+    // Without shader-f16 Turbo HQ silently runs the regular q4 files; say so.
+    const reduced = loaded.model === 'turbo-hq' && !loaded.f16 ? ' · без fp16, как Turbo' : '';
+    $('engine-summary').textContent = `${modelName(loaded.model)} · ${loaded.device === 'webgpu' ? 'Видеокарта' : 'Процессор'}${reduced}`;
     if (!valid(token)) return;
     setPhase('idle', 'Модель готова');
     toast(`Модель готова. Поставьте курсор в любом приложении и нажмите ${HOTKEYS[settings.hotkey].label}.`);

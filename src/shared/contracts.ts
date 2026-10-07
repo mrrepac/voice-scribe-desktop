@@ -2,7 +2,7 @@ import type { TranscriptDetails, TranscriptSegment, SubtitleFormat } from './tra
 import type { SpeakerTurn, SpeakerProgress } from './speakers';
 import type { RememberedCorrection } from './corrections';
 import type { Hotkey } from './hotkeys';
-export type Model = 'auto' | 'tiny' | 'base' | 'small' | 'turbo';
+export type Model = 'auto' | 'tiny' | 'base' | 'small' | 'turbo' | 'turbo-hq';
 export type Device = 'auto' | 'wasm' | 'webgpu';
 export interface Settings {
   llmEnabled: boolean; llmBaseUrl: string; llmModel: string;

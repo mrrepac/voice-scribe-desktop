@@ -28,9 +28,23 @@ test('auto selects the same q4 turbo plan while small still uses fp16', async t 
   assert.equal(small.files[0],'onnx/encoder_model_fp16.onnx');
 });
 
+test('turbo HQ uses an fp16 encoder only where the GPU supports it', async t => {
+  gpu(t,true);
+  const hq = await planDownload('turbo-hq','webgpu',() => {});
+  assert.equal(hq.modelId,'onnx-community/whisper-large-v3-turbo');
+  assert.deepEqual(hq.files,['onnx/encoder_model_fp16.onnx','onnx/decoder_model_merged_q4.onnx']);
+});
+
+test('turbo HQ without shader-f16 reuses the regular turbo files', async t => {
+  gpu(t,false);
+  const hq = await planDownload('turbo-hq','webgpu',() => {});
+  assert.deepEqual(hq.files,['onnx/encoder_model_q4.onnx','onnx/decoder_model_merged_q4.onnx']);
+});
+
 test('turbo rejects CPU before downloading oversized weights', async t => {
   gpu(t,false);
   await assert.rejects(planDownload('turbo','wasm',() => {}),/MODEL_TOO_BIG_FOR_CPU/);
+  await assert.rejects(planDownload('turbo-hq','wasm',() => {}),/MODEL_TOO_BIG_FOR_CPU/);
   const auto = await planDownload('auto','wasm',() => {});
   assert.equal(auto.model,'small');
   assert.deepEqual(auto.files,['onnx/encoder_model_quantized.onnx','onnx/decoder_model_merged_quantized.onnx']);

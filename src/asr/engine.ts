@@ -99,7 +99,9 @@ interface GpuLike {
   requestAdapter(): Promise<GpuAdapter | null>;
 }
 
-export type WhisperModel = "tiny" | "base" | "small" | "turbo";
+/** turbo-hq: the same Turbo weights with an fp16 encoder — more accurate, larger download. */
+export type WhisperModel = "tiny" | "base" | "small" | "turbo" | "turbo-hq";
+const isTurbo = (model: WhisperModel) => model === "turbo" || model === "turbo-hq";
 /** Настройка модели: конкретная или «авто» — лучшая, которую тянет ЭТО устройство. */
 export type ModelPref = WhisperModel | "auto";
 export type DevicePref = "auto" | "webgpu" | "wasm";
@@ -110,6 +112,7 @@ const MODEL_IDS: Record<WhisperModel, string> = {
   base: "onnx-community/whisper-base",
   small: "onnx-community/whisper-small",
   turbo: "onnx-community/whisper-large-v3-turbo",
+  "turbo-hq": "onnx-community/whisper-large-v3-turbo",
 };
 
 export interface ProgressInfo {
@@ -274,7 +277,7 @@ let loaded: Loaded | null = null;
  * после отката WebGPU→wasm сохранённый ключ не совпал бы с проверочным, и
  * пайплайн пересобирался бы на каждый запрос (в живом режиме — на каждую фразу).
  */
-const keyOf = (modelId: string, dev: Device, f16: boolean) => `${modelId}|${dev}|${f16 ? "f16" : "f32"}`;
+const keyOf = (model: WhisperModel, dev: Device, f16: boolean) => `${model}|${dev}|${f16 ? "f16" : "f32"}`;
 
 /** «Авто» = максимум, который реально тянет это устройство. */
 function resolveAutoModel(device: Device, mobile: boolean): WhisperModel {
@@ -293,6 +296,9 @@ function dtypeFor(model: WhisperModel, device: Device, f16: boolean): Dtype {
   // model's download/memory size stable across GPUs and reuses the original
   // plugin's q4 cache even when a newer Chromium enables shader-f16 support.
   if (model === "turbo") return { encoder_model: "q4", decoder_model_merged: "q4" };
+  // Turbo HQ: q4 hurts the encoder most, so it alone stays fp16 (~1.5 GiB in total).
+  // Without shader-f16 the fp16 encoder cannot run; fall back to the regular Turbo files.
+  if (model === "turbo-hq") return f16 ? { encoder_model: "fp16", decoder_model_merged: "q4" } : { encoder_model: "q4", decoder_model_merged: "q4" };
   // GPU с fp16 — как в официальных whisper-webgpu демо (быстро и точно).
   if (f16) return { encoder_model: "fp16", decoder_model_merged: "q4" };
   // tiny/base/small without shader-f16 use the smaller, built-in fp32 encoder.
@@ -321,7 +327,7 @@ export async function planDownload(pref: ModelPref, devicePref: DevicePref, onPr
   if (!probed) onProgress({ stage: "device" });
   const { device, f16 } = await probeDeviceCached(devicePref);
   const model: WhisperModel = pref === "auto" ? resolveAutoModel(device, !!host?.mobile) : pref;
-  if (model === "turbo" && device === "wasm") throw new Error("MODEL_TOO_BIG_FOR_CPU");
+  if (isTurbo(model) && device === "wasm") throw new Error("MODEL_TOO_BIG_FOR_CPU");
   const d = dtypeFor(model, device, f16);
   const enc = typeof d === "string" ? d : d.encoder_model;
   const dec = typeof d === "string" ? d : d.decoder_model_merged;
@@ -359,12 +365,12 @@ async function getPipelineInner(pref: ModelPref, devicePref: DevicePref, onProgr
   const { device, f16 } = await probeDeviceCached(devicePref);
   let model: WhisperModel = pref === "auto" ? resolveAutoModel(device, !!host?.mobile) : pref;
   let modelId = MODEL_IDS[model];
-  if (loaded?.key === keyOf(modelId, device, f16)) return loaded; // уже готов — молча
+  if (loaded?.key === keyOf(model, device, f16)) return loaded; // уже готов — молча
 
   // turbo нужен GPU: на wasm её энкодер (615 МБ одним буфером) не влезает в
   // 32-битную кучу. Бросаем ДО скачивания — чтобы не слить сотни мегабайт зря.
   // Достижимо только ручным выбором: «авто» turbo на wasm не назначает.
-  if (model === "turbo" && device === "wasm") {
+  if (isTurbo(model) && device === "wasm") {
     throw new Error("MODEL_TOO_BIG_FOR_CPU");
   }
 
@@ -407,7 +413,7 @@ async function getPipelineInner(pref: ModelPref, devicePref: DevicePref, onProgr
   } catch (e) {
     // WebGPU может не завестись (драйвер/операции) — откат на CPU, но turbo
     // на CPU не тянет, поэтому его не откатываем, а отдаём понятную ошибку.
-    if (dev === "webgpu" && (model !== "turbo" || pref === "auto")) {
+    if (dev === "webgpu" && (!isTurbo(model) || pref === "auto")) {
       console.warn("voice-scribe: webgpu pipeline failed, falling back to wasm", e);
       onProgress({ stage: "device", note: "webgpu-fallback" });
       dev = "wasm";
@@ -426,7 +432,7 @@ async function getPipelineInner(pref: ModelPref, devicePref: DevicePref, onProgr
   }
   const effF16 = dev === "webgpu" ? f16 : false;
   loaded = {
-    key: keyOf(modelId, dev, effF16),
+    key: keyOf(model, dev, effF16),
     asr,
     device: dev,
     model,
