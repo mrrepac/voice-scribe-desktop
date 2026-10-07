@@ -1,7 +1,7 @@
 {
   "name": "voice-scribe-desktop",
   "productName": "Voice Scribe",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Локальная голосовая диктовка в любое приложение Windows",
   "author": "mrrepac",
   "license": "MIT",
@@ -49,7 +49,11 @@
       {
         "from": "node_modules/ffmpeg-static",
         "to": ".",
-        "filter": ["ffmpeg.exe", "ffmpeg.exe.LICENSE", "ffmpeg.exe.README"]
+        "filter": [
+          "ffmpeg.exe",
+          "ffmpeg.exe.LICENSE",
+          "ffmpeg.exe.README"
+        ]
       },
       {
         "from": "native/bin",
