@@ -50,7 +50,7 @@ export interface ScribeAPI {
   copy(text: string): Promise<void>;
   saveText(text: string): Promise<boolean>;
   saveSubtitles(segments: TranscriptSegment[], format: SubtitleFormat, name?: string): Promise<boolean>;
-  diarize(pcm: Float32Array): Promise<SpeakerTurn[]>;
+  diarize(pcm: Float32Array, speakerCount?: number): Promise<SpeakerTurn[]>;
   cancelDiarization(): Promise<void>;
   onDiarizationProgress(handler: (progress: SpeakerProgress) => void): () => void;
   pickAudio(): Promise<{name: string; data: ArrayBuffer} | null>;

@@ -58,6 +58,42 @@ test('speaker settings and corrected labels survive restart without affecting di
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test('global rename merges split labels and survives history reload and subtitle export', async () => {
+  const directory = await mkdtemp(path.resolve('.test-build/speaker-rename-'));
+  try {
+    const editor = new TranscriptEditor();
+    const speakers = ['Оратор 1', 'Оратор 2', 'Оратор 1', 'Оратор 3', 'Оратор 3', 'Не определён', 'Не определён'];
+    editor.load('', speakers.map((speaker, i) => ({ start: i * 2, end: i * 2 + 1, text: `Реплика ${i}`, speaker })));
+    editor.renameSpeaker(0, 'Анна');
+    editor.renameSpeaker(3, 'Анна');
+    editor.renameSpeaker(0, 'Мария');
+    editor.renameSpeaker(5, 'Борис');
+    assert.deepEqual(editor.segments.map(s => s.speaker), ['Мария', 'Оратор 2', 'Мария', 'Мария', 'Мария', 'Борис', 'Не определён']);
+    const store = new Storage(directory);
+    const item = await store.addHistory(editor.text, 'file', { segments: editor.segments, name: 'meeting.mp4' });
+    editor.renameSpeaker(1, 'Иван');
+    await store.updateHistory(item.id, editor.text, { segments: editor.segments, name: editor.name });
+    const saved = (await new Storage(directory).history())[0];
+    assert.equal(saved.text, editor.text);
+    assert.deepEqual(saved.segments, editor.segments);
+    assert.equal((formatSubtitles(saved.segments!, 'srt').match(/Мария:/g) ?? []).length, 4);
+    assert.equal((formatSubtitles(saved.segments!, 'vtt').match(/Мария:/g) ?? []).length, 4);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('requested speaker count reaches worker and invalid counts are rejected', async () => {
+  const directory = await mkdtemp(path.resolve('.test-build/speaker-count-'));
+  try {
+    const script = path.join(directory, 'fixture.cjs');
+    await writeFile(script, "process.on('message',m=>process.send({type:'result',turns:[{start:0,end:1,speaker:m.speakerCount??-1}]}));");
+    const service = new DiarizationService(script, directory);
+    const pcm = new Float32Array(16000);
+    for (const value of [0, -1, 1.5, 51, NaN]) await assert.rejects(service.run(pcm, () => {}, value), /число ораторов/);
+    assert.equal((await service.run(pcm, () => {}, 2))[0].speaker, 2);
+    assert.equal((await service.run(pcm, () => {}))[0].speaker, -1);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('native process cancellation rejects promptly and permits a subsequent run', async () => {
   const directory = await mkdtemp(path.resolve('.test-build/speaker-worker-'));
   const script = path.join(directory, 'fixture.cjs');

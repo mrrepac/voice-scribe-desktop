@@ -51,6 +51,12 @@ export async function speakerSmokeTest(win: BrowserWindow): Promise<void> {
       await delay(50);
     }
     await execute(`document.querySelector('[data-view="dictation"]').click();document.getElementById('pick-file').click();`);
+    for (let i = 0; i < 100; i++) {
+      if (await execute(`document.getElementById('file-options-dialog').open`)) break;
+      await delay(100);
+    }
+    check(await execute(`document.getElementById('file-options-dialog').open`), 'Missing file options');
+    await execute(`document.getElementById('file-speaker-count').value='2';document.querySelector('#file-options-form button[value="start"]').click();`);
     let imported: any;
     for (let i = 0; i < 600; i++) {
       await delay(500);

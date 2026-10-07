@@ -49,7 +49,7 @@ async function prepare(directory: string): Promise<string[]> {
   return files;
 }
 
-process.once('message', async (message: { pcm: Float32Array; modelDirectory: string }) => {
+process.once('message', async (message: { pcm: Float32Array; modelDirectory: string; speakerCount?: number }) => {
   try {
     const [segmentation, embedding] = await prepare(message.modelDirectory);
     report('Определяем ораторов · это может занять несколько минут');
@@ -59,7 +59,7 @@ process.once('message', async (message: { pcm: Float32Array; modelDirectory: str
     const engine = new OfflineSpeakerDiarization({
       segmentation: { pyannote: { model: segmentation }, numThreads: 2, provider: 'cpu' },
       embedding: { model: embedding, numThreads: 2, provider: 'cpu' },
-      clustering: { numClusters: -1, threshold: 0.5 },
+      clustering: { numClusters: message.speakerCount ?? -1, threshold: 0.5 },
       minDurationOn: 0.2, minDurationOff: 0.5,
     });
     if (engine.sampleRate !== 16000) throw new Error('Неподдерживаемая частота модели ораторов');

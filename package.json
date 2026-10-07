@@ -1,7 +1,7 @@
 {
   "name": "voice-scribe-desktop",
   "productName": "Voice Scribe",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Локальная голосовая диктовка в любое приложение Windows",
   "author": "mrrepac",
   "license": "MIT",

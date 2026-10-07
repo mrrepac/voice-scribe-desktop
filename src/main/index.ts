@@ -8,6 +8,7 @@ import { NativeBridge } from './native';
 import type { Command, Status } from '../shared/contracts';
 import { formatSubtitles, normalizeSegments, subtitleFilename } from '../shared/transcript';
 import { speakerSmokeTest } from './speaker-smoke';
+import { importSmokeTest } from './import-smoke';
 import { subtitleSmokeTest } from './subtitle-smoke';
 import { correctionSmokeTest } from './correction-smoke';
 import { proofread, listModels } from './llm';
@@ -145,10 +146,10 @@ function setupIpc():void {
     if(result.canceled || !result.filePath)return false;
     await writeFile(result.filePath,value,'utf8');return true;
   });
-  handle('speakers:run',pcm=>diarization.run(pcm,value=>{if(!win.isDestroyed())win.webContents.send('speakers:progress',value);}));
+  handle('speakers:run',(pcm,speakerCount)=>diarization.run(pcm,value=>{if(!win.isDestroyed())win.webContents.send('speakers:progress',value);},speakerCount));
   handle('speakers:cancel',()=>diarization.cancel());
   handle('audio:pick',async()=>{
-    const result=await dialog.showOpenDialog(win,{title:'Расшифровать аудиофайл',properties:['openFile'],filters:[{name:'Аудио',extensions:['wav','mp3','m4a','ogg','flac','webm','mp4','aac']}]});
+    const result=await dialog.showOpenDialog(win,{title:'Расшифровать аудио или видео',properties:['openFile'],filters:[{name:'Аудио и видео',extensions:['wav','mp3','m4a','ogg','flac','webm','mp4','aac','mov','mkv','avi','m4v','opus']}]});
     if(result.canceled || !result.filePaths[0]) return null;
     const file=result.filePaths[0];
     if((await stat(file)).size>250*1024*1024) throw new Error('Файл больше 250 МБ. Разделите запись на части.');
@@ -365,6 +366,7 @@ async function smokeTest():Promise<void> {
     await new Promise(resolve=>setTimeout(resolve,200));
     await writeFile(path.join(out,'smoke-history.png'),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());
     if(process.argv.includes('--design-test'))await designSmokeTest();
+    if(process.argv.includes('--import-test'))await importSmokeTest(win);
     if(process.argv.includes('--speakers-test'))await speakerSmokeTest(win);
     if(process.argv.includes('--subtitles-test'))await subtitleSmokeTest(win);
     if(process.argv.includes('--corrections-test'))await correctionSmokeTest(win);

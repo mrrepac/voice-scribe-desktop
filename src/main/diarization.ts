@@ -7,7 +7,10 @@ export class DiarizationService {
   private reject: ((error: Error) => void) | null = null;
   constructor(private script: string, private modelDirectory: string) {}
 
-  run(pcm: Float32Array, progress: (value: SpeakerProgress) => void): Promise<SpeakerTurn[]> {
+  run(pcm: Float32Array, progress: (value: SpeakerProgress) => void, speakerCount?: number): Promise<SpeakerTurn[]> {
+    if (speakerCount !== undefined && (!Number.isInteger(speakerCount) || speakerCount < 1 || speakerCount > 50)) {
+      return Promise.reject(new Error('Укажите число ораторов от 1 до 50'));
+    }
     if (this.child) return Promise.reject(new Error('Определение ораторов уже выполняется'));
     if (!(pcm instanceof Float32Array) || !pcm.length || pcm.length > 16000 * 60 * 120 || pcm.some(x => !Number.isFinite(x))) {
       return Promise.reject(new Error('Для определения ораторов нужен аудиофайл длительностью до двух часов'));
@@ -36,7 +39,7 @@ export class DiarizationService {
         else if (message?.type === 'result' && Array.isArray(message.turns)) finish(undefined, message.turns);
         else if (message?.type === 'error') finish(new Error(String(message.message)));
       });
-      child.send({ pcm, modelDirectory: this.modelDirectory }, error => { if (error) finish(error); });
+      child.send({ pcm, modelDirectory: this.modelDirectory, speakerCount }, error => { if (error) finish(error); });
     });
   }
 

@@ -22,7 +22,7 @@ const api: ScribeAPI = {
   copy:text=>ipcRenderer.invoke('copy',text),
   saveText:text=>ipcRenderer.invoke('text:save',text),
   saveSubtitles:(segments,format,name)=>ipcRenderer.invoke('subtitles:save',segments,format,name),
-  diarize:pcm=>ipcRenderer.invoke('speakers:run',pcm),
+  diarize:(pcm,speakerCount)=>ipcRenderer.invoke('speakers:run',pcm,speakerCount),
   cancelDiarization:()=>ipcRenderer.invoke('speakers:cancel'),
   onDiarizationProgress:handler=>{const fn=(_:unknown,value:import('../shared/speakers').SpeakerProgress)=>handler(value);ipcRenderer.on('speakers:progress',fn);return()=>ipcRenderer.removeListener('speakers:progress',fn);},
   pickAudio:()=>ipcRenderer.invoke('audio:pick'),

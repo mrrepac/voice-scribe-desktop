@@ -44,6 +44,17 @@ export class TranscriptEditor {
     if (label) cue.speaker = label; else delete cue.speaker;
   }
 
+  renameSpeaker(index: number, name: string): void {
+    const previous = this.segments[index]?.speaker;
+    // Unknown and mixed cues do not represent one shared voice.
+    if (!previous || previous === 'Не определён' || previous === 'Несколько ораторов') {
+      this.editSpeaker(index, name);
+      return;
+    }
+    const matches = this.segments.map((cue, i) => cue.speaker === previous ? i : -1);
+    for (const i of matches) if (i >= 0) this.editSpeaker(i, name);
+  }
+
   snapshot(): TranscriptEditorState {
     return { text: this.text, segments: this.segments.map(segment => ({ ...segment })), name: this.name, view: this.view };
   }

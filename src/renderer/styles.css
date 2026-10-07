@@ -202,6 +202,10 @@ fieldset:disabled .switch { opacity: .42; }
 .correction-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
 .correction-actions > :first-child { margin-right: auto; }
 .correction-dialog .correction-error { color: var(--danger); }
+.correction-dialog input[type="checkbox"] { width: auto; }
+#file-options-name { overflow-wrap: anywhere; }
+.file-drop-hint { color: var(--muted); font-size: 12px; margin-top: 12px; }
+.file-dragging::after { content: 'Отпустите аудио или видео для расшифровки'; position: fixed; inset: 12px; z-index: 20; display: grid; place-items: center; padding: 24px; text-align: center; border: 2px dashed var(--text); border-radius: 8px; background: var(--surface); color: var(--text); pointer-events: none; }
 
 @media (max-width: 639px) {
   .view { padding: 14px 16px; }

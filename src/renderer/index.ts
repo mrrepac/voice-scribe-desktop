@@ -28,6 +28,8 @@ const fieldset = $<HTMLFieldSetElement>('settings-fieldset');
 const resultText = $<HTMLTextAreaElement>('result-text');
 const editor = new TranscriptEditor();
 const correctionDialog = $<HTMLDialogElement>('correction-dialog');
+const fileOptionsDialog = $<HTMLDialogElement>('file-options-dialog');
+document.querySelector('#file-options-form button[value="cancel"]')!.addEventListener('click', () => fileOptionsDialog.close('cancel'));
 const correctionForm = $<HTMLFormElement>('correction-form');
 const correctionFrom = $<HTMLInputElement>('correction-from');
 const correctionTo = $<HTMLInputElement>('correction-to');
@@ -378,7 +380,7 @@ function setTranscriptView(view: TranscriptView): void {
   $('result-view-text').setAttribute('aria-pressed', String(editor.view === 'text'));
   $('result-view-segments').setAttribute('aria-pressed', String(editor.view === 'segments'));
   $('transcript-help').textContent = editor.view === 'segments'
-    ? `Таймкоды определены автоматически и могут быть неточными. Исправляйте текст в фрагментах.${editor.segments.some(cue => cue.speaker) ? ' Поле оратора меняет метку этого фрагмента; голоса определены приблизительно.' : ''}${currentHistoryId ? ' Правки сохраняются в истории.' : ''}`
+    ? `Таймкоды определены автоматически и могут быть неточными. Исправляйте текст в фрагментах.${editor.segments.some(cue => cue.speaker) ? ' Имя оратора меняется во всей расшифровке. Чтобы объединить лишние метки одного голоса, задайте им одинаковое имя. «Не определён» и «Несколько ораторов» меняются только у выбранной реплики.' : ''}${currentHistoryId ? ' Правки сохраняются в истории.' : ''}`
     : 'Текст собран из фрагментов. Для исправлений откройте «Таймкоды».';
   if (editor.view === 'segments') resizeSegmentEditors();
 }
@@ -436,10 +438,12 @@ function renderTranscript(): void {
       speaker.maxLength = 80;
       speaker.disabled = isBusy();
       speaker.setAttribute('aria-label', 'Оратор фрагмента ' + (index + 1));
-      speaker.title = 'Имя оратора для этого фрагмента';
+      speaker.title = 'Переименовать этого оратора во всей расшифровке. Одинаковые имена объединяют метки.';
       speaker.addEventListener('change', () => {
-        editor.editSpeaker(index, speaker.value);
-        speaker.value = editor.segments[index].speaker ?? '';
+        editor.renameSpeaker(index, speaker.value);
+        document.querySelectorAll<HTMLInputElement>('.segment-speaker').forEach((input, i) => {
+          input.value = editor.segments[i].speaker ?? '';
+        });
         updateResultText();
         lastResult = editor.text;
         queueHistorySave();
@@ -683,6 +687,7 @@ async function finish(enter = false): Promise<void> {
 
 function cancel(message = 'Диктовка отменена'): void {
   if (!isBusy()) return;
+  if (fileOptionsDialog.open) fileOptionsDialog.close('cancel');
   generation++;
   void api.cancelProofread().catch(() => {});
   gesture.reset();
@@ -711,20 +716,39 @@ async function prepare(): Promise<void> {
   } catch (error) { fail(error, token); }
 }
 
-async function pickFile(): Promise<void> {
+async function pickFile(dropped?: File): Promise<void> {
   if (!initialized || isBusy() || correctionDialog.open || correctionSaving) return;
   const token = ++generation;
   const options = { ...settings };
-  setPhase('starting', 'Выберите аудиофайл');
+  setPhase('starting', 'Выберите аудио или видео');
   $('record-title').textContent = 'Выберите аудиозапись';
   $('record-description').textContent = 'WAV, MP3, M4A, OGG или WebM.';
   try {
-    const file = await api.pickAudio();
+    if (dropped && dropped.size > 250 * 1024 * 1024) throw new Error('Файл больше 250 МБ. Разделите запись на части.');
+    if (dropped && !/\.(wav|mp3|m4a|ogg|flac|webm|mp4|aac|mov|mkv|avi|m4v|opus)$/i.test(dropped.name)) throw new Error('Перетащите аудио или видео: WAV, MP3, M4A, OGG, FLAC, WebM, MP4, MOV, MKV или AVI.');
+    const file = dropped ? { name: dropped.name, data: await dropped.arrayBuffer() } : await api.pickAudio();
     if (!valid(token)) return;
     if (!file) { setPhase('idle'); return; }
+    $('file-options-name').textContent = file.name;
+    const enabled = $<HTMLInputElement>('file-diarization');
+    const countInput = $<HTMLInputElement>('file-speaker-count');
+    enabled.checked = options.diarization;
+    countInput.value = '';
+    countInput.disabled = !enabled.checked;
+    enabled.onchange = () => { countInput.disabled = !enabled.checked; };
+    fileOptionsDialog.returnValue = 'cancel';
+    const decision = new Promise<string>(resolve => fileOptionsDialog.addEventListener('close', () => resolve(fileOptionsDialog.returnValue), { once: true }));
+    fileOptionsDialog.showModal();
+    const choice = await decision;
+    if (!valid(token)) return;
+    if (choice !== 'start') { setPhase('idle'); return; }
+    options.diarization = enabled.checked;
+    const speakerCount = countInput.value ? Number(countInput.value) : undefined;
     setPhase('transcribing', 'Читаем аудиофайл');
     $('record-description').textContent = file.name;
-    const pcm = await decodeAudioTo16kMono(file.data);
+    const pcm = await decodeAudioTo16kMono(file.data).catch(() => {
+      throw new Error('Не удалось прочитать звуковую дорожку. Возможно, кодек не поддерживается или в видео нет звука. Попробуйте WAV, MP3 или видео WebM.');
+    });
     if (!valid(token)) return;
     const transcript = await asr.transcribeTimed(pcm, options, progress => messageProgress(progress, token));
     if (!valid(token)) return;
@@ -739,7 +763,7 @@ async function pickFile(): Promise<void> {
         $('record-description').textContent = progress.message + '. Аудио остаётся на компьютере.';
       });
       try {
-        const turns = await api.diarize(pcm);
+        const turns = await api.diarize(pcm, speakerCount);
         if (!valid(token)) return;
         segments = assignSpeakers(segments, turns);
         const count = new Set(turns.map(turn => turn.speaker)).size;
@@ -1115,6 +1139,34 @@ recordButton.addEventListener('click', () => { if (phase === 'recording' || phas
 $('cancel-button').addEventListener('click', () => cancel());
 $('prepare-button').addEventListener('click', () => void prepare());
 $('pick-file').addEventListener('click', () => void pickFile());
+let fileDragDepth = 0;
+document.addEventListener('dragenter', event => {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault();
+  fileDragDepth++;
+  if (initialized && !isBusy() && !correctionDialog.open) document.body.classList.add('file-dragging');
+});
+document.addEventListener('dragover', event => {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = initialized && !isBusy() && !correctionDialog.open ? 'copy' : 'none';
+});
+document.addEventListener('dragleave', event => {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  if (--fileDragDepth <= 0) { fileDragDepth = 0; document.body.classList.remove('file-dragging'); }
+});
+document.addEventListener('drop', event => {
+  if (!event.dataTransfer?.types.includes('Files')) return;
+  event.preventDefault();
+  fileDragDepth = 0;
+  document.body.classList.remove('file-dragging');
+  const files = event.dataTransfer?.files;
+  if (!files?.length) return;
+  if (!initialized || isBusy() || correctionDialog.open || correctionSaving) { toast('Сначала завершите текущее действие.', true); return; }
+  if (files.length !== 1) { toast('Перетащите один файл за раз.', true); return; }
+  document.querySelector<HTMLButtonElement>('[data-view="dictation"]')?.click();
+  void pickFile(files[0]);
+});
 $('hide-window').addEventListener('click', () => api.hide());
 $('copy-result').addEventListener('click', () => void copyText(resultText.value));
 $('export-result').addEventListener('click', () => { void api.saveText(resultText.value).catch(error => toast(friendlyError(error), true)); });

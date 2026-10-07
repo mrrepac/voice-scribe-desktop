@@ -8,6 +8,21 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <dialog id="file-options-dialog" class="correction-dialog" aria-labelledby="file-options-title">
+    <form method="dialog" id="file-options-form">
+      <h2 id="file-options-title">Расшифровать файл</h2>
+      <p id="file-options-name"></p>
+      <label><input id="file-diarization" type="checkbox"> Определять ораторов</label>
+      <label class="field">Сколько ораторов в записи?
+        <input id="file-speaker-count" type="number" min="1" max="50" step="1" placeholder="Не знаю — определить автоматически">
+      </label>
+      <p>Если знаете число голосов, укажите его: это поможет избежать лишних меток. Пустое поле — автоматический подбор.</p>
+      <div class="actions">
+        <button class="text-button" type="button" value="cancel">Отмена</button>
+        <button class="button" value="start">Расшифровать</button>
+      </div>
+    </form>
+  </dialog>
   <!-- TABLER_ICONS: generated from the official package at build time -->
   <header class="app-toolbar">
     <nav class="tabs" aria-label="Разделы приложения">
@@ -28,12 +43,13 @@
         <div class="record-controls">
           <button class="record-button" id="record-button" aria-label="Записать"><svg id="record-icon" aria-hidden="true"><use href="#i-mic"/></svg><span id="record-button-label">Записать</span></button>
           <button id="cancel-button" class="text-button cancel-button" hidden>Отменить <kbd>Esc</kbd></button>
-          <button class="text-button" id="pick-file"><svg aria-hidden="true"><use href="#i-file"/></svg>Открыть аудио</button>
+          <button class="text-button" id="pick-file"><svg aria-hidden="true"><use href="#i-file"/></svg>Открыть файл</button>
           <div class="record-meta">
             <span class="status-tag" id="status-tag"><span aria-hidden="true"></span><span id="status-label" role="status" aria-live="polite" aria-atomic="true">Готово</span></span>
             <span class="timer" id="timer" aria-label="Длительность записи">00:00</span>
           </div>
         </div>
+        <p class="file-drop-hint">Перетащите сюда аудио или видео для расшифровки · до 250 МБ</p>
         <h2 id="record-title" class="sr-only">Диктовка</h2>
         <p id="record-description" class="session-detail"></p>
         <div class="waveform" id="waveform" aria-hidden="true"></div>
