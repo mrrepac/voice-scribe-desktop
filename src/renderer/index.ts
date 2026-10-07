@@ -61,6 +61,8 @@ interface Session {
   proofreadingStarted?: boolean;
   stopRequested: boolean;
   segmenter: Segmenter | null;
+  /** Raw 16 kHz microphone blocks; recognized directly, without the Opus round trip. */
+  pcm: Float32Array[];
   parts: string[];
   jobs: Promise<void>[];
   liveUnavailable: boolean;
@@ -565,18 +567,27 @@ async function complete(text: string, source: 'dictation' | 'file', token: numbe
   toast(note);
 }
 
+function joinPcm(blocks: Float32Array[]): Float32Array {
+  const out = new Float32Array(blocks.reduce((sum, block) => sum + block.length, 0));
+  let offset = 0;
+  for (const block of blocks) { out.set(block, offset); offset += block.length; }
+  return out;
+}
+
 async function start(target: string | null): Promise<void> {
   if (!initialized || !canStart() || correctionDialog.open || correctionSaving) return;
   const token = ++generation;
   const active: Session = {
     token, settings: { ...settings }, recorder: new Recorder(), target, enter: false, proofread: false,
-    stopRequested: false, segmenter: null, parts: [], jobs: [], liveUnavailable: false,
+    stopRequested: false, segmenter: null, pcm: [], parts: [], jobs: [], liveUnavailable: false,
     liveFailed: false, voiced: false, voicedTicks: 0, lastVoice: performance.now(), noise: .002,
   };
   session = active;
   lastSeconds = 0;
   $('timer').textContent = '00:00';
   setPhase('starting');
+  // Load the model while the user speaks. Errors resurface from transcription.
+  void asr.prepare(active.settings, progress => messageProgress(progress, token)).catch(() => {});
   if (active.settings.live) {
     active.segmenter = new Segmenter(segment => {
       if (!valid(token) || active.liveUnavailable || active.liveFailed) return;
@@ -599,13 +610,17 @@ async function start(target: string | null): Promise<void> {
     });
   }
   try {
-    await active.recorder.start(active.settings.microphone || undefined, active.segmenter ? {
-      onPcm: pcm => { if (valid(token)) active.segmenter?.push(pcm); },
+    await active.recorder.start(active.settings.microphone || undefined, {
+      onPcm: pcm => {
+        if (!valid(token)) return;
+        active.pcm.push(pcm);
+        active.segmenter?.push(pcm);
+      },
       onUnavailable: () => { active.liveUnavailable = true; },
-    } : undefined);
+    });
     if (!valid(token)) { active.recorder.cancel(); return; }
     setPhase('recording');
-    if (active.liveUnavailable) $('record-description').textContent = 'Предпросмотр недоступен на этом устройстве. Запись будет распознана целиком.';
+    if (active.liveUnavailable && active.segmenter) $('record-description').textContent = 'Предпросмотр недоступен на этом устройстве. Запись будет распознана целиком.';
     void refreshMicrophones();
     if (active.stopRequested) { await finish(active.enter); return; }
     if (active.settings.sounds) playCue('start');
@@ -632,7 +647,10 @@ async function finish(enter = false): Promise<void> {
       if (!valid(token)) return;
       if (!active.liveFailed) text = joinSegments(active.parts);
     }
-    if (!text && recording) {
+    if (!text && !active.liveUnavailable && active.pcm.length) {
+      text = await asr.transcribe(joinPcm(active.pcm), active.settings, progress => messageProgress(progress, token));
+    } else if (!text && recording) {
+      // The PCM tap is unavailable: fall back to decoding the compressed recording.
       const buffer = await recording.blob.arrayBuffer();
       if (!valid(token)) return;
       const pcm = await decodeAudioTo16kMono(buffer);

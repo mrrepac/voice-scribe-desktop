@@ -98,6 +98,25 @@ async function modelCacheResponse(key:string):Promise<Response> {
   const response=await net.fetch(pathToFileURL(cached.file).href);
   return new Response(response.body,{headers:{'content-type':'application/octet-stream','content-length':String(cached.size)}});
 }
+async function appResponse(request:Request):Promise<Response> {
+  const url=new URL(request.url);
+  if(url.host!=='app')return new Response('Not found',{status:404});
+  let relative:string;
+  try{relative=decodeURIComponent(url.pathname).replace(/^\/+/, '');}catch{return new Response('Bad path',{status:400});}
+  if(relative.startsWith('model-cache/'))return modelCacheResponse(relative.slice('model-cache/'.length));
+  const base=path.join(root,'dist'); const file=path.resolve(base,relative);
+  if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
+  return net.fetch(pathToFileURL(file).href);
+}
+// Cross-origin isolation enables SharedArrayBuffer, which multithreaded ONNX
+// Runtime WASM needs. "credentialless" keeps the Hugging Face model downloads working.
+function isolated(response:Response):Response {
+  const headers=new Headers(response.headers);
+  headers.set('Cross-Origin-Opener-Policy','same-origin');
+  headers.set('Cross-Origin-Embedder-Policy','credentialless');
+  headers.set('Cross-Origin-Resource-Policy','same-origin');
+  return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
 function setupIpc():void {
   handle('updates:state',()=>updates.state);
   handle('updates:check',()=>updates.check());
@@ -422,7 +441,7 @@ async function smokeTest():Promise<void> {
     if(process.argv.includes('--history-test'))await historySmokeTest(win);
     if(!bridge.ready)await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Native helper startup timeout')),10000);bridge.once('ready',()=>{clearTimeout(timer);resolve();});bridge.once('failure',message=>{clearTimeout(timer);reject(new Error(message));});});
     const native=await bridge.request('diagnostics');
-    const asr=app.isPackaged ? await win.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const w=new Worker('./asr-worker.js',{type:'module'}); const t=setTimeout(()=>{w.terminate();reject(new Error('Packaged worker timeout'));},20000); w.onerror=e=>{clearTimeout(t);w.terminate();reject(new Error(e.message));}; w.onmessage=({data})=>{if(data.t==='ready')w.postMessage({t:'plan',id:1,pref:'auto',devicePref:'auto'});if(data.t==='plan'){clearTimeout(t);w.terminate();resolve({ok:true,plan:data.plan});}if(data.t==='error'){clearTimeout(t);w.terminate();reject(new Error(data.message));}};})`) : await win.webContents.executeJavaScript(`(async()=>{ const m=await import('./smoke.js'); const audio=${process.argv.includes('--asr-test')} ? await (await fetch('./fixture.wav')).arrayBuffer() : undefined; return m.runAsrSmoke({model:'auto',device:'auto',audio}); })()`);
+    const asr=app.isPackaged ? await win.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const w=new Worker('./asr-worker.js',{type:'module'}); const t=setTimeout(()=>{w.terminate();reject(new Error('Packaged worker timeout'));},20000); w.onerror=e=>{clearTimeout(t);w.terminate();reject(new Error(e.message));}; w.onmessage=({data})=>{if(data.t==='ready')w.postMessage({t:'plan',id:1,pref:'auto',devicePref:'auto'});if(data.t==='plan'){clearTimeout(t);w.terminate();resolve({ok:true,plan:data.plan});}if(data.t==='error'){clearTimeout(t);w.terminate();reject(new Error(data.message));}};})`) : await win.webContents.executeJavaScript(`(async()=>{ const m=await import('./smoke.js'); const audio=${process.argv.includes('--asr-test')} ? await (await fetch('./fixture.wav')).arrayBuffer() : undefined; return m.runAsrSmoke({model:'auto',device:'auto',audio,checkIsolation:true}); })()`);
     if(asr.ok===false)throw new Error(JSON.stringify(asr));
     await writeFile(path.join(out,'smoke-result.json'),JSON.stringify({ok:true,result,native,asr,logs},null,2));
     console.log('SMOKE_OK',JSON.stringify({native,asr}));
@@ -444,16 +463,7 @@ else {
   app.on('window-all-closed',()=>{});
   void app.whenReady().then(async()=>{
     await audioImport.cleanupAbandoned();
-    protocol.handle('scribe',request=>{
-      const url=new URL(request.url);
-      if(url.host!=='app')return new Response('Not found',{status:404});
-      let relative:string;
-      try{relative=decodeURIComponent(url.pathname).replace(/^\/+/, '');}catch{return new Response('Bad path',{status:400});}
-      if(relative.startsWith('model-cache/'))return modelCacheResponse(relative.slice('model-cache/'.length));
-      const base=path.join(root,'dist'); const file=path.resolve(base,relative);
-      if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
-      return net.fetch(pathToFileURL(file).href);
-    });
+    protocol.handle('scribe',async request=>isolated(await appResponse(request)));
     session.defaultSession.setPermissionRequestHandler((contents,permission,callback,details)=>callback(contents===win?.webContents && permission==='media' && trusted(details.requestingUrl) && (!('mediaTypes' in details) || !details.mediaTypes || details.mediaTypes.every(t=>t==='audio'))));
     session.defaultSession.setPermissionCheckHandler((contents,permission,origin)=>contents===win?.webContents && permission==='media' && trusted(origin));
     if(smoke)session.defaultSession.webRequest.onBeforeRequest({urls:['http://*/*','https://*/*']},(_details,callback)=>callback({cancel:true}));

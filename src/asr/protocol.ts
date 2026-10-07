@@ -16,7 +16,7 @@ export type ToWorker =
   | { t: "cache-reply"; id: number; error?: string };
 
 export type FromWorker =
-  | { t: "ready" }
+  | { t: "ready"; crossOriginIsolated?: boolean }
   | { t: "progress"; id: number; p: ProgressInfo }
   | { t: "plan"; id: number; plan: DownloadPlan }
   | { t: "loaded"; id: number; info: LoadedInfo }

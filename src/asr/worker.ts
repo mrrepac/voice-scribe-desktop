@@ -113,4 +113,4 @@ self.onmessage = ({ data: msg }) => {
     self.postMessage({ t: "error", id: msg.id, message: error instanceof Error ? error.message : String(error) });
   });
 };
-self.postMessage({ t: "ready" });
+self.postMessage({ t: "ready", crossOriginIsolated: self.crossOriginIsolated });

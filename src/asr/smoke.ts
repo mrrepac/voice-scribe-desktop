@@ -3,7 +3,7 @@ import { AsrClient, decodeAudioTo16kMono } from './client';
 import type { ModelOptions, ProgressInfo, DownloadPlan, LoadedInfo } from './client';
 import type { Transcript } from '../shared/transcript';
 
-export async function runAsrSmoke(options: ModelOptions & { prepare?: boolean; audio?: ArrayBuffer; timeoutMs?: number; timestamps?: boolean }) {
+export async function runAsrSmoke(options: ModelOptions & { prepare?: boolean; audio?: ArrayBuffer; timeoutMs?: number; timestamps?: boolean; checkIsolation?: boolean }) {
   const client = new AsrClient();
   const progress: ProgressInfo[] = [];
   let stage = 'plan';
@@ -20,7 +20,15 @@ export async function runAsrSmoke(options: ModelOptions & { prepare?: boolean; a
     if (progress.length > 256) progress.shift();
     console.log('ASR_SMOKE', JSON.stringify(value));
   };
+  let workerIsolated: boolean | null = null;
   const run = async () => {
+    // Multithreaded WASM needs the worker itself to be cross-origin isolated.
+    if (options.checkIsolation) workerIsolated = await new Promise<boolean>((resolve, reject) => {
+      const probe = new Worker('./asr-worker.js', { type: 'module' });
+      probe.onerror = event => { probe.terminate(); reject(new Error(event.message)); };
+      probe.onmessage = ({ data }) => { if (data.t === 'ready') { probe.terminate(); resolve(data.crossOriginIsolated === true); } };
+    });
+    if (workerIsolated === false) throw new Error('SMOKE_WORKER_NOT_ISOLATED');
     plan = await client.plan(options, report);
     if (options.prepare || options.audio) {
       stage = 'cache';
@@ -73,7 +81,7 @@ export async function runAsrSmoke(options: ModelOptions & { prepare?: boolean; a
   });
   try {
     await Promise.race([run(), deadline]);
-    return { ok: true, stage, plan, loaded, text, transcript, leadingSilenceSec, cacheCheck, missingFiles, elapsedMs: Math.round(performance.now() - startedAt), progress };
+    return { ok: true, crossOriginIsolated: globalThis.crossOriginIsolated === true, workerIsolated, stage, plan, loaded, text, transcript, leadingSilenceSec, cacheCheck, missingFiles, elapsedMs: Math.round(performance.now() - startedAt), progress };
   } catch (error) {
     return {
       ok: false, stage, plan, loaded, text, transcript, leadingSilenceSec, cacheCheck, missingFiles,
