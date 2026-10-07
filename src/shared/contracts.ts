@@ -10,14 +10,14 @@ export interface Settings {
   microphone: string; voiceCommands: boolean; replacements: string;
   silenceSeconds: number; live: boolean; sounds: boolean; warmup: boolean;
   startAtLogin: boolean; diarization: boolean;
-  historyLimit: number; hotkey: Hotkey;
+  historyLimit: number; hotkey: Hotkey; restoreClipboard: boolean;
 }
 export const DEFAULT_SETTINGS: Settings = {
   llmEnabled: false, llmBaseUrl: 'https://api.openai.com/v1', llmModel: '',
   model: 'auto', device: 'auto', language: 'ru', language2: '', microphone: '',
   voiceCommands: false, replacements: '', silenceSeconds: 0, live: false,
   sounds: true, warmup: false, startAtLogin: false, diarization: true,
-  historyLimit: 100, hotkey: 'ctrl-space',
+  historyLimit: 100, hotkey: 'ctrl-space', restoreClipboard: false,
 };
 export interface HistoryItem extends TranscriptDetails { id: string; text: string; createdAt: string; source: 'dictation' | 'file'; pinned?: boolean; }
 export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'error';
@@ -31,7 +31,7 @@ export type Command =
   | { action: 'proofread'; mode?: import('./proofread').ProofreadMode }
   | { action: 'paste-last'; target: string }
   | { action: 'bridge-error'; message: string };
-export interface Delivery { status: 'inserted' | 'clipboard-only'; reason?: string; entered?: boolean; }
+export interface Delivery { status: 'inserted' | 'clipboard-only'; reason?: string; entered?: boolean; restored?: boolean; }
 export interface ScribeAPI {
   getUpdateState(): Promise<import('./updates').UpdateState>;
   checkForUpdates(): Promise<import('./updates').UpdateState>;

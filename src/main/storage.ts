@@ -23,7 +23,7 @@ export function validateSettings(raw: unknown): Settings {
   if (['auto','tiny','base','small','turbo','turbo-hq'].includes(String(v.model))) s.model = v.model as Settings['model'];
   if (['auto','wasm','webgpu'].includes(String(v.device))) s.device = v.device as Settings['device'];
   for (const k of ['language','language2','microphone','replacements'] as const) if (typeof v[k] === 'string') s[k] = v[k].slice(0, k === 'replacements' ? 50000 : 300);
-  for (const k of ['voiceCommands','live','sounds','warmup','startAtLogin','diarization'] as const) if (typeof v[k] === 'boolean') s[k] = v[k];
+  for (const k of ['voiceCommands','live','sounds','warmup','startAtLogin','diarization','restoreClipboard'] as const) if (typeof v[k] === 'boolean') s[k] = v[k];
   if (typeof v.silenceSeconds === 'number' && Number.isFinite(v.silenceSeconds)) s.silenceSeconds = v.silenceSeconds === 0 ? 0 : Math.min(8, Math.max(2,v.silenceSeconds));
   if (isHotkey(v.hotkey)) s.hotkey = v.hotkey;
   if (typeof v.historyLimit === 'number' && Number.isInteger(v.historyLimit)) s.historyLimit = Math.min(5000,Math.max(100,v.historyLimit));

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, Tray } from 'electron';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,6 +20,7 @@ import { UpdateService } from './updates';
 import { AudioImport } from './audio-import';
 import { NativeRecovery } from './native-recovery';
 import { historySmokeTest } from './history-smoke';
+import { clipboardSmokeTest } from './clipboard-smoke';
 import { HOTKEYS, type Hotkey } from '../shared/hotkeys';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -98,6 +99,24 @@ async function modelCacheResponse(key:string):Promise<Response> {
   const response=await net.fetch(pathToFileURL(cached.file).href);
   return new Response(response.body,{headers:{'content-type':'application/octet-stream','content-length':String(cached.size)}});
 }
+// Copies every format the clipboard offers (including raw Windows formats such as
+// copied files) so it can be put back after insertion. OLE bookkeeping formats
+// only point at the previous owner's live object and must not be replayed.
+async function snapshotClipboard():Promise<ClipboardItem[]> {
+  const items:ClipboardItem[]=[];
+  for(const item of await clipboard.read()){
+    const data:Record<string,Blob>={};
+    for(const type of item.types)if(!/"(DataObject|Ole Private Data)"/.test(type)){
+      const value=await item.getType(type);
+      if(value instanceof Blob)data[type]=value;
+    }
+    if(Object.keys(data).length)items.push(new ClipboardItem(data));
+  }
+  return items;
+}
+async function restoreClipboard(previous:ClipboardItem[]):Promise<void> {
+  if(previous.length)await clipboard.write(previous);else clipboard.clear();
+}
 async function appResponse(request:Request):Promise<Response> {
   const url=new URL(request.url);
   if(url.host!=='app')return new Response('Not found',{status:404});
@@ -172,7 +191,7 @@ function setupIpc():void {
   });
   handle('copy',text=>{
     const value=textArg(text);
-    const run=deliveryQueue.then(()=>clipboard.writeText(value));
+    const run=deliveryQueue.then(async()=>{await clipboard.writeText(value);});
     deliveryQueue=run.catch(()=>{});
     return run;
   });
@@ -181,14 +200,32 @@ function setupIpc():void {
     const generation=deliveryGeneration;
     const run=deliveryQueue.then(async()=>{
     if(generation!==deliveryGeneration)return {status:'clipboard-only',reason:'cancelled'};
-    clipboard.writeText(value);
-    if(typeof target!=='string' || !/^[1-9]\d*$/.test(target) || !bridge.ready) return {status:'clipboard-only',reason:'no-target'};
+    const targeted=typeof target==='string' && /^[1-9]\d*$/.test(target) && bridge.ready;
+    let previous:ClipboardItem[]|null=null;
+    if(targeted && (await storage.settings().catch(()=>null))?.restoreClipboard){
+      try{previous=await snapshotClipboard();}catch(error){console.error('Clipboard snapshot failed',error);}
+    }
+    // The paste must not be sent before the clipboard actually holds the text.
+    await clipboard.writeText(value);
+    if(!targeted) return {status:'clipboard-only',reason:'no-target'};
     // Never paste into this application's own window.
     const own=win.getNativeWindowHandle();
     const ownId=own.length===8?own.readBigUInt64LE().toString():own.readUInt32LE().toString();
     if(target===ownId) return {status:'clipboard-only',reason:'own-window'};
-    try { return await bridge.request('insert',{target,enter:enter===true}); }
+    let result;
+    try { result=await bridge.request('insert',{target,enter:enter===true}); }
     catch(error) { return {status:'clipboard-only',reason:(error as Error).message}; }
+    // Failed insertion keeps the text in the clipboard for a manual Ctrl+V.
+    if(previous && result?.status==='inserted'){
+      // Some applications read the clipboard lazily after Ctrl+V; give them time first.
+      await new Promise(resolve=>setTimeout(resolve,500));
+      // Something newer was copied in the meantime: leave it alone.
+      if(await clipboard.readText().catch(()=>'')===value){
+        try{await restoreClipboard(previous);result={...result,restored:true};}
+        catch(error){console.error('Clipboard restore failed',error);}
+      }
+    }
+    return result;
     });
     deliveryQueue=run.catch(()=>{});
     return run;
@@ -440,6 +477,7 @@ async function smokeTest():Promise<void> {
     if(process.argv.includes('--llm-test'))await llmSmokeTest(win);
     if(process.argv.includes('--history-test'))await historySmokeTest(win);
     if(!bridge.ready)await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Native helper startup timeout')),10000);bridge.once('ready',()=>{clearTimeout(timer);resolve();});bridge.once('failure',message=>{clearTimeout(timer);reject(new Error(message));});});
+    if(process.argv.includes('--clipboard-test'))await clipboardSmokeTest(win,bridge);
     const native=await bridge.request('diagnostics');
     const asr=app.isPackaged ? await win.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const w=new Worker('./asr-worker.js',{type:'module'}); const t=setTimeout(()=>{w.terminate();reject(new Error('Packaged worker timeout'));},20000); w.onerror=e=>{clearTimeout(t);w.terminate();reject(new Error(e.message));}; w.onmessage=({data})=>{if(data.t==='ready')w.postMessage({t:'plan',id:1,pref:'auto',devicePref:'auto'});if(data.t==='plan'){clearTimeout(t);w.terminate();resolve({ok:true,plan:data.plan});}if(data.t==='error'){clearTimeout(t);w.terminate();reject(new Error(data.message));}};})`) : await win.webContents.executeJavaScript(`(async()=>{ const m=await import('./smoke.js'); const audio=${process.argv.includes('--asr-test')} ? await (await fetch('./fixture.wav')).arrayBuffer() : undefined; return m.runAsrSmoke({model:'auto',device:'auto',audio,checkIsolation:true}); })()`);
     if(asr.ok===false)throw new Error(JSON.stringify(asr));
