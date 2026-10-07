@@ -3,6 +3,14 @@
 Voice Scribe Desktop uses the following components. This file is an attribution
 index; full license texts are retained in `licenses/` and in the Electron runtime.
 
+Audio imports use a separate FFmpeg executable supplied by ffmpeg-static 5.3.0
+(GPL-3.0-or-later). The Windows binary is FFmpeg 6.1.1 essentials by gyan.dev,
+licensed under GPL v3. Its complete license and build/source information are
+distributed beside the executable as `ffmpeg.exe.LICENSE` and `ffmpeg.exe.README`.
+FFmpeg source for this build: https://github.com/FFmpeg/FFmpeg/commit/e38092ef93.
+Build distribution and corresponding build information: https://www.gyan.dev/ffmpeg/builds/.
+FFmpeg runs as a separate local process and does not send audio over the network.
+
 | Component | Attribution | License / included text |
 |---|---|---|
 | Voice Scribe 0.4.1 for Obsidian | Copyright (c) 2026 mrrepac | MIT; project `LICENSE` |

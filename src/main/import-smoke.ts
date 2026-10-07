@@ -1,4 +1,4 @@
-import { type BrowserWindow } from 'electron';
+import { dialog, type BrowserWindow } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -44,6 +44,26 @@ export async function importSmokeTest(win: BrowserWindow): Promise<void> {
   })()`);
   const out = path.resolve('artifacts/import');
   await mkdir(out, { recursive: true });
+  const fixture=path.join(out,'silence.wav');
+  const wav=Buffer.alloc(44+32000);
+  wav.write('RIFF');wav.writeUInt32LE(wav.length-8,4);wav.write('WAVEfmt ',8);wav.writeUInt32LE(16,16);
+  wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(16000,24);wav.writeUInt32LE(32000,28);
+  wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(32000,40);
+  await writeFile(fixture,wav);
+  const originalOpen=dialog.showOpenDialog;
+  dialog.showOpenDialog=(async()=>({canceled:false,filePaths:[fixture]})) as typeof dialog.showOpenDialog;
+  try {
+    await win.webContents.executeJavaScript(`(async()=>{
+      const file=await window.scribe.pickAudio();
+      try {
+        const metadata=await window.scribe.prepareAudio(file.id);
+        if(metadata.samples!==16000)throw Error('Incorrect decoded sample count');
+        const pcm=await window.scribe.audioChunk(file.id,0);
+        if(!(pcm instanceof Float32Array) || pcm.length!==16000 || pcm.some(x=>x!==0))throw Error('Invalid PCM over IPC');
+      } finally {await window.scribe.releaseAudio(file.id);}
+    })()`);
+    result.checks.push('bundled decoder and PCM IPC');
+  } finally {dialog.showOpenDialog=originalOpen;}
   await writeFile(path.join(out, 'report.json'), JSON.stringify(result, null, 2));
   await win.reload();
   await new Promise(resolve => setTimeout(resolve, 800));

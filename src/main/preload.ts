@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ScribeAPI, Command } from '../shared/contracts';
 const api: ScribeAPI = {
   getUpdateState:()=>ipcRenderer.invoke('updates:state'),
@@ -8,6 +8,7 @@ const api: ScribeAPI = {
   onUpdateState:handler=>{const fn=(_:unknown,value:import('../shared/updates').UpdateState)=>handler(value);ipcRenderer.on('updates:state',fn);return()=>ipcRenderer.removeListener('updates:state',fn);},
   listModels:()=>ipcRenderer.invoke('llm:models'),
   proofread:(text,mode)=>ipcRenderer.invoke('llm:proofread',text,mode),
+  proofreadBatch:batch=>ipcRenderer.invoke('llm:batch',batch),
   cancelProofread:()=>ipcRenderer.invoke('llm:cancel'),
   saveApiKey:key=>ipcRenderer.invoke('llm:key-save',key),
   hasApiKey:()=>ipcRenderer.invoke('llm:key-has'),
@@ -17,7 +18,9 @@ const api: ScribeAPI = {
   getHistory:()=>ipcRenderer.invoke('history:get'),
   addHistory:(text,source,details)=>ipcRenderer.invoke('history:add',text,source,details),
   updateHistory:(id,text,details)=>ipcRenderer.invoke('history:update',id,text,details),
-  clearHistory:()=>ipcRenderer.invoke('history:clear'),
+  clearHistory:keepPinned=>ipcRenderer.invoke('history:clear',keepPinned),
+  pinHistory:(id,pinned)=>ipcRenderer.invoke('history:pin',id,pinned),
+  exportHistory:()=>ipcRenderer.invoke('history:export'),
   deliver:(text,target,enter)=>ipcRenderer.invoke('deliver',text,target,enter),
   copy:text=>ipcRenderer.invoke('copy',text),
   saveText:text=>ipcRenderer.invoke('text:save',text),
@@ -26,6 +29,12 @@ const api: ScribeAPI = {
   cancelDiarization:()=>ipcRenderer.invoke('speakers:cancel'),
   onDiarizationProgress:handler=>{const fn=(_:unknown,value:import('../shared/speakers').SpeakerProgress)=>handler(value);ipcRenderer.on('speakers:progress',fn);return()=>ipcRenderer.removeListener('speakers:progress',fn);},
   pickAudio:()=>ipcRenderer.invoke('audio:pick'),
+  droppedAudio:file=>ipcRenderer.invoke('audio:select',webUtils.getPathForFile(file)),
+  prepareAudio:id=>ipcRenderer.invoke('audio:prepare',id),
+  audioChunk:(id,offset)=>ipcRenderer.invoke('audio:chunk',id,offset),
+  releaseAudio:id=>ipcRenderer.invoke('audio:release',id),
+  cancelAudio:()=>ipcRenderer.invoke('audio:cancel'),
+  diarizeAudio:(id,count)=>ipcRenderer.invoke('audio:diarize',id,count),
   status:value=>ipcRenderer.send('status',value),
   hide:()=>ipcRenderer.send('hide'),
   onCommand:handler=>{const fn=(_:unknown,cmd:Command)=>handler(cmd);ipcRenderer.on('command',fn);return()=>ipcRenderer.removeListener('command',fn);},
@@ -33,5 +42,8 @@ const api: ScribeAPI = {
   cacheHas:key=>ipcRenderer.invoke('cache:has',key),
   cachePut:(key,data)=>ipcRenderer.invoke('cache:put',key,data),
   getAppInfo:()=>ipcRenderer.invoke('app:info'),
+  getNativeHealth:()=>ipcRenderer.invoke('native:health'),
+  restartNative:()=>ipcRenderer.invoke('native:restart'),
+  onNativeHealth:handler=>{const fn=(_:unknown,state:import('./native-recovery').NativeHealth)=>handler(state);ipcRenderer.on('native:health',fn);return()=>ipcRenderer.removeListener('native:health',fn);},
 };
 contextBridge.exposeInMainWorld('scribe',api);

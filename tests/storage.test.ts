@@ -1,9 +1,59 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { mkdtemp, readFile, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, mkdir, writeFile, rm, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { Storage, validateSettings, cacheFilename } from '../src/main/storage';
 import { applyReplacements, parseReplacements } from '../src/shared/clean';
+
+test('corrupt history recovers a backup, preserves the original and reports recovery once', async () => {
+  const base=await mkdtemp(path.resolve('.test-build/recovery-'));
+  try {
+    const notices: string[]=[];
+    const store=new Storage(base,undefined,message=>notices.push(message));
+    const first=await store.addHistory('saved','dictation');
+    await store.addHistory('latest','dictation');
+    await writeFile(path.join(base,'history.json'),'{broken');
+    const results=await Promise.all([store.history(),store.history()]);
+    assert.deepEqual(results,[[first],[first]]);
+    assert.equal(notices.length,1);
+    const archived=(await readdir(base)).find(name=>name.endsWith('.corrupt'))!;
+    assert.equal(await readFile(path.join(base,archived),'utf8'),'{broken');
+    await store.clearHistory();
+    await writeFile(path.join(base,'history.json'),'null');
+    assert.deepEqual(await store.history(),[]);
+  } finally { await rm(base,{recursive:true,force:true}); }
+});
+
+test('unrecoverable corruption blocks writes without overwriting evidence', async () => {
+  const base=await mkdtemp(path.resolve('.test-build/unrecoverable-'));
+  try {
+    await writeFile(path.join(base,'settings.json'),'{broken');
+    const store=new Storage(base);
+    await assert.rejects(store.saveSettings({}),/Не удалось восстановить/);
+    assert.equal(await readFile(path.join(base,'settings.json'),'utf8'),'{broken');
+  } finally { await rm(base,{recursive:true,force:true}); }
+});
+
+test('pinned transcripts survive retention, edits, restart and selective clearing',async()=>{
+  const base=await mkdtemp(path.resolve('.test-build/pinned-'));
+  try {
+    const store=new Storage(base);
+    const first=await store.addHistory('important','dictation');
+    await store.pinHistory(first.id,true);
+    await store.updateHistory(first.id,'edited');
+    await store.saveSettings({historyLimit:100});
+    for(let i=0;i<103;i++)await store.addHistory(`text ${i}`,'dictation');
+    const items=await new Storage(base).history();
+    assert.equal(items.length,101);
+    assert.equal(items.find(item=>item.id===first.id)?.pinned,true);
+    await store.saveSettings({historyLimit:500});
+    await store.addHistory('new','dictation');assert.equal((await store.history()).length,102);
+    await store.clearHistory(true);
+    assert.equal((await store.history())[0].text,'edited');
+    await store.pinHistory(first.id,false);
+    await store.clearHistory(true);assert.deepEqual(await store.history(),[]);
+  }finally{await rm(base,{recursive:true,force:true});}
+});
 
 test('settings reject unsafe values and bound memory usage',()=>{
   const settings=validateSettings({model:'other',device:'unknown',silenceSeconds:-2,startAtLogin:'true',replacements:'a'.repeat(60000)});

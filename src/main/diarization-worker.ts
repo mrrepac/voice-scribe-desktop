@@ -49,8 +49,11 @@ async function prepare(directory: string): Promise<string[]> {
   return files;
 }
 
-process.once('message', async (message: { pcm: Float32Array; modelDirectory: string; speakerCount?: number }) => {
+process.once('message', async (message: { pcm?: Float32Array; pcmPath?: string; modelDirectory: string; speakerCount?: number }) => {
   try {
+    const bytes = message.pcmPath ? await readFile(message.pcmPath) : undefined;
+    const pcm = bytes ? new Float32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 4) : message.pcm;
+    if (!pcm?.length || pcm.length > 16000 * 7200 || pcm.some(x=>!Number.isFinite(x))) throw new Error('Некорректная звуковая дорожка');
     const [segmentation, embedding] = await prepare(message.modelDirectory);
     report('Определяем ораторов · это может занять несколько минут');
     const { OfflineSpeakerDiarization } = require('sherpa-onnx-node') as {
@@ -63,7 +66,7 @@ process.once('message', async (message: { pcm: Float32Array; modelDirectory: str
       minDurationOn: 0.2, minDurationOff: 0.5,
     });
     if (engine.sampleRate !== 16000) throw new Error('Неподдерживаемая частота модели ораторов');
-    const turns = engine.process(message.pcm);
+    const turns = engine.process(pcm);
     process.send?.({ type: 'result', turns }, () => process.exit(0));
   } catch (error) {
     process.send?.({ type: 'error', message: error instanceof Error ? error.message : String(error) }, () => process.exit(1));

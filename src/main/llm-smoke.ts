@@ -31,7 +31,8 @@ export async function llmSmokeTest(win: BrowserWindow): Promise<void> {
     const input = JSON.parse(body).messages[1].content;
     const code = mode === 'error' ? 401 : 200;
     const corrected=input.replace('превет','Привет')+'!';
-    const content=JSON.stringify({text:corrected,issues:corrected.includes('мир')?[{quote:'мир',reason:'Нужен контекст: <b>обращение или название?</b>'}]:[]});
+    const batch=JSON.parse(body).messages[0].content.includes('корректор субтитров') ? JSON.parse(input) : null;
+    const content=batch ? JSON.stringify({cues:batch.cues.map((cue:any)=>({id:cue.id,text:cue.text.replace('превет','Привет')+'!',issues:[]}))}) : JSON.stringify({text:corrected,issues:corrected.includes('мир')?[{quote:'мир',reason:'Нужен контекст: <b>обращение или название?</b>'}]:[]});
     const send = () => { res.writeHead(code, {'Content-Type':'application/json'}); res.end(JSON.stringify({choices:[{finish_reason:'stop',message:{content}}]})); };
     if (mode === 'slow') setTimeout(send, 1200); else send();
   });

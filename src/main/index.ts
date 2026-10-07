@@ -1,5 +1,5 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, Tray } from 'electron';
-import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Storage } from './storage';
@@ -11,12 +11,15 @@ import { speakerSmokeTest } from './speaker-smoke';
 import { importSmokeTest } from './import-smoke';
 import { subtitleSmokeTest } from './subtitle-smoke';
 import { correctionSmokeTest } from './correction-smoke';
-import { proofread, listModels } from './llm';
+import { proofread, proofreadBatch, listModels } from './llm';
 import { ApiKeyStore } from './api-key';
 import { llmSmokeTest } from './llm-smoke';
 import { existsSync } from 'node:fs';
 import { autoUpdater } from 'electron-updater';
 import { UpdateService } from './updates';
+import { AudioImport } from './audio-import';
+import { NativeRecovery } from './native-recovery';
+import { historySmokeTest } from './history-smoke';
 
 const smoke = process.argv.includes('--smoke-test');
 const root = app.getAppPath();
@@ -32,10 +35,16 @@ let deliveryQueue:Promise<unknown>=Promise.resolve();
 let deliveryGeneration=0;
 let lastStatus:Status={phase:'idle',message:'Готов к диктовке'};
 const bridge=new NativeBridge();
+const nativeRecovery=new NativeRecovery(bridge,app.isPackaged?path.join(process.resourcesPath,'native/VoiceScribe.Native.exe'):path.join(root,'native/bin/VoiceScribe.Native.exe'),state=>{
+  if(win && !win.isDestroyed())win.webContents.send('native:health',state);
+});
 const apiKeys=new ApiKeyStore(app.getPath('userData'));
 let proofreadController: AbortController | null = null;
-const storage=new Storage(app.getPath('userData'),process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA,'voice-scribe','models') : undefined);
+const storage=new Storage(app.getPath('userData'),process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA,'voice-scribe','models') : undefined, message => {
+  void dialog.showMessageBox({type:'warning',title:'Восстановление данных Voice Scribe',message});
+});
 const diarization=new DiarizationService(path.join(root,'dist/diarization-worker.cjs'),path.join(app.getPath('userData'),'models','speakers'));
+const audioImport = new AudioImport(app.isPackaged ? path.join(process.resourcesPath,'ffmpeg.exe') : path.join(root,'node_modules/ffmpeg-static/ffmpeg.exe'), path.join(app.getPath('userData'),'audio-temp'));
 const trusted=(url:string)=>{try { const u=new URL(url); return u.protocol==='scribe:' && u.host==='app'; } catch { return false; }};
 const send=(command:Command)=>{if(win && !win.isDestroyed())win.webContents.send('command',command);};
 const textArg=(v:unknown)=>{if(typeof v!=='string' || v.length>2_000_000) throw new Error('Некорректный текст');return v;};
@@ -87,6 +96,13 @@ function setupIpc():void {
     return apiKeys.save(key.trim(),(await storage.settings()).llmBaseUrl);
   });
   handle('llm:cancel',()=>{proofreadController?.abort();});
+  handle('llm:batch',async batch=>{
+    if(proofreadController)throw new Error('Вычитка уже выполняется.');
+    const controller=new AbortController();proofreadController=controller;
+    const timer=setTimeout(()=>controller.abort(),60000);
+    try {const settings=await storage.settings();return await proofreadBatch(batch,settings,await apiKeys.get(settings.llmBaseUrl),controller.signal);}
+    finally {clearTimeout(timer);if(proofreadController===controller)proofreadController=null;}
+  });
   handle('llm:proofread',async(value,mode='review')=>{
     if(mode!=='plain' && mode!=='review')throw new Error('Неизвестный режим вычитки.');
     if(proofreadController)throw new Error('Вычитка уже выполняется.');
@@ -107,7 +123,15 @@ function setupIpc():void {
   handle('history:get',()=>storage.history());
   handle('history:add',(text,source,details)=>storage.addHistory(textArg(text),source==='file'?'file':'dictation',details));
   handle('history:update',(id,text,details)=>storage.updateHistory(textArg(id),textArg(text),details));
-  handle('history:clear',()=>storage.clearHistory());
+  handle('history:clear',keepPinned=>storage.clearHistory(keepPinned===true));
+  handle('history:pin',(id,pinned)=>{if(typeof pinned!=='boolean')throw new Error('Некорректное закрепление');return storage.pinHistory(textArg(id),pinned);});
+  handle('history:export',async()=>{
+    const result=await dialog.showSaveDialog(win,{title:'Экспорт всей истории',defaultPath:'voice-scribe-history.txt',filters:[{name:'Текст',extensions:['txt']}]});
+    if(result.canceled || !result.filePath)return false;
+    const items=await storage.history();
+    const text=items.map(item=>`${item.createdAt}${item.name?' · '+item.name:''}${item.pinned?' · Закреплено':''}\n\n${item.text}`).join('\n\n────────────────────────\n\n');
+    await writeFile(result.filePath,text,'utf8');return true;
+  });
   handle('copy',text=>{
     const value=textArg(text);
     const run=deliveryQueue.then(()=>clipboard.writeText(value));
@@ -148,17 +172,23 @@ function setupIpc():void {
   });
   handle('speakers:run',(pcm,speakerCount)=>diarization.run(pcm,value=>{if(!win.isDestroyed())win.webContents.send('speakers:progress',value);},speakerCount));
   handle('speakers:cancel',()=>diarization.cancel());
+  handle('audio:select',source=>audioImport.select(textArg(source)));
+  handle('audio:prepare',id=>audioImport.prepare(textArg(id)));
+  handle('audio:chunk',(id,offset)=>audioImport.chunk(textArg(id),offset));
+  handle('audio:release',id=>audioImport.release(textArg(id)));
+  handle('audio:cancel',()=>{diarization.cancel();return audioImport.cancelAll();});
+  handle('audio:diarize',(id,count)=>diarization.runFile(audioImport.pcmPath(textArg(id)),value=>{if(!win.isDestroyed())win.webContents.send('speakers:progress',value);},count));
   handle('audio:pick',async()=>{
     const result=await dialog.showOpenDialog(win,{title:'Расшифровать аудио или видео',properties:['openFile'],filters:[{name:'Аудио и видео',extensions:['wav','mp3','m4a','ogg','flac','webm','mp4','aac','mov','mkv','avi','m4v','opus']}]});
     if(result.canceled || !result.filePaths[0]) return null;
-    const file=result.filePaths[0];
-    if((await stat(file)).size>250*1024*1024) throw new Error('Файл больше 250 МБ. Разделите запись на части.');
-    const data=await readFile(file); return {name:path.basename(file),data:data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength)};
+    return audioImport.select(result.filePaths[0]);
   });
   handle('cache:get',key=>storage.cacheGet(textArg(key)));
   handle('cache:has',key=>storage.cacheHas(textArg(key)));
   handle('cache:put',(key,data)=>{if(!(data instanceof ArrayBuffer) || data.byteLength>1_000_000_000) throw new Error('Invalid cache data');return storage.cachePut(textArg(key),data);});
   handle('app:info',()=>({version:app.getVersion(),dataPath:storage.root,nativeReady:bridge.ready}));
+  handle('native:health',()=>nativeRecovery.state);
+  handle('native:restart',()=>{if(active())throw new Error('Дождитесь завершения записи или обработки');nativeRecovery.restart();});
   ipcMain.on('hide',event=>{if(event.sender===win.webContents)win.hide();});
   ipcMain.on('status',(event,status:Status)=>{
     if(event.sender!==win.webContents || !status || !['idle','starting','recording','transcribing','preparing','error'].includes(status.phase))return;
@@ -183,7 +213,7 @@ async function createWindows():Promise<void> {
   win.on('close',event=>{if(!quitting){event.preventDefault();win.hide();}});
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',(event,url)=>{if(!trusted(url))event.preventDefault();});
-  win.webContents.on('render-process-gone',(_event,details)=>{console.error('Renderer stopped',details);diarization.cancel();deliveryGeneration++;if(bridge.ready){void bridge.request('cancel-insert').catch(()=>{});void bridge.request('set-active',{active:false}).catch(()=>{});}overlay?.hide();if(!quitting)dialog.showErrorBox('Voice Scribe','Процесс распознавания остановился. Перезапустите приложение. Сохранённая история останется на диске.');});
+  win.webContents.on('render-process-gone',(_event,details)=>{console.error('Renderer stopped',details);diarization.cancel();proofreadController?.abort();void audioImport.cancelAll().catch(error=>console.error('Audio cleanup failed',error));deliveryGeneration++;if(bridge.ready){void bridge.request('cancel-insert').catch(()=>{});void bridge.request('set-active',{active:false}).catch(()=>{});}overlay?.hide();if(!quitting)dialog.showErrorBox('Voice Scribe','Процесс распознавания остановился. Перезапустите приложение. Сохранённая история останется на диске.');});
   overlay=new BrowserWindow({width:430,height:90,show:false,transparent:true,frame:false,focusable:false,skipTaskbar:true,resizable:false,alwaysOnTop:true,webPreferences:{preload:path.join(root,'dist/overlay-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}});
   overlay.setIgnoreMouseEvents(true);
   setupIpc();
@@ -371,6 +401,7 @@ async function smokeTest():Promise<void> {
     if(process.argv.includes('--subtitles-test'))await subtitleSmokeTest(win);
     if(process.argv.includes('--corrections-test'))await correctionSmokeTest(win);
     if(process.argv.includes('--llm-test'))await llmSmokeTest(win);
+    if(process.argv.includes('--history-test'))await historySmokeTest(win);
     if(!bridge.ready)await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Native helper startup timeout')),10000);bridge.once('ready',()=>{clearTimeout(timer);resolve();});bridge.once('failure',message=>{clearTimeout(timer);reject(new Error(message));});});
     const native=await bridge.request('diagnostics');
     const asr=app.isPackaged ? await win.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const w=new Worker('./asr-worker.js',{type:'module'}); const t=setTimeout(()=>{w.terminate();reject(new Error('Packaged worker timeout'));},20000); w.onerror=e=>{clearTimeout(t);w.terminate();reject(new Error(e.message));}; w.onmessage=({data})=>{if(data.t==='ready')w.postMessage({t:'plan',id:1,pref:'auto',devicePref:'auto'});if(data.t==='plan'){clearTimeout(t);w.terminate();resolve({ok:true,plan:data.plan});}if(data.t==='error'){clearTimeout(t);w.terminate();reject(new Error(data.message));}};})`) : await win.webContents.executeJavaScript(`(async()=>{ const m=await import('./smoke.js'); const audio=${process.argv.includes('--asr-test')} ? await (await fetch('./fixture.wav')).arrayBuffer() : undefined; return m.runAsrSmoke({model:'auto',device:'auto',audio}); })()`);
@@ -384,9 +415,17 @@ async function smokeTest():Promise<void> {
 if(!app.requestSingleInstanceLock())app.quit();
 else {
   app.on('second-instance',()=>{if(win)show();});
-  app.on('before-quit',()=>{quitting=true;diarization.cancel();bridge.stop();});
+  let audioCleaned = false;
+  app.on('before-quit',event=>{
+    quitting=true;diarization.cancel();nativeRecovery.stop();
+    if (!audioCleaned) {
+      event.preventDefault();
+      void audioImport.cancelAll().catch(error=>console.error('Audio cleanup failed',error)).finally(()=>{audioCleaned=true;app.quit();});
+    }
+  });
   app.on('window-all-closed',()=>{});
   void app.whenReady().then(async()=>{
+    await audioImport.cleanupAbandoned();
     protocol.handle('scribe',request=>{
       const url=new URL(request.url);
       if(url.host!=='app')return new Response('Not found',{status:404});
@@ -406,9 +445,8 @@ else {
       if(event.action==='dictation-down' && own)event={...event,target:''};
       send(event as Command);
     });
-    bridge.on('failure',message=>{if(!quitting)send({action:'bridge-error',message});});
     bridge.on('ready',()=>{configureNativeWindow();void bridge.request('set-active',{active:active()}).catch(()=>{});});
-    bridge.start(app.isPackaged?path.join(process.resourcesPath,'native/VoiceScribe.Native.exe'):path.join(root,'native/bin/VoiceScribe.Native.exe'));
+    nativeRecovery.restart();
     await createWindows(); configureNativeWindow(); makeTray();
     if(installed){
       const saved=await storage.settings();

@@ -24,6 +24,7 @@ export function validateSettings(raw: unknown): Settings {
   for (const k of ['language','language2','microphone','replacements'] as const) if (typeof v[k] === 'string') s[k] = v[k].slice(0, k === 'replacements' ? 50000 : 300);
   for (const k of ['voiceCommands','live','sounds','warmup','startAtLogin','diarization'] as const) if (typeof v[k] === 'boolean') s[k] = v[k];
   if (typeof v.silenceSeconds === 'number' && Number.isFinite(v.silenceSeconds)) s.silenceSeconds = v.silenceSeconds === 0 ? 0 : Math.min(8, Math.max(2,v.silenceSeconds));
+  if (typeof v.historyLimit === 'number' && Number.isInteger(v.historyLimit)) s.historyLimit = Math.min(5000,Math.max(100,v.historyLimit));
   return s;
 }
 export function cacheFilename(key: string): string {
@@ -33,7 +34,8 @@ export function cacheFilename(key: string): string {
 }
 export class Storage {
   private queue: Promise<unknown> = Promise.resolve();
-  constructor(readonly root: string, private legacyModels?: string) {}
+  private reads = new Map<string, Promise<unknown>>();
+  constructor(readonly root: string, private legacyModels?: string, private recovered: (message: string) => void = () => {}) {}
   async settings(): Promise<Settings> { return validateSettings(await this.read('settings.json', {})); }
   async saveSettings(value: unknown): Promise<Settings> { const s=validateSettings(value); await this.write('settings.json',s); return s; }
   async rememberCorrection(from: string, to: string): Promise<RememberedCorrection> {
@@ -47,14 +49,31 @@ export class Storage {
   }
   async history(): Promise<HistoryItem[]> {
     const data=await this.read('history.json',[]);
-    return Array.isArray(data) ? data.filter((x):x is HistoryItem=> !!x && typeof x.text==='string' && typeof x.id==='string' && typeof x.createdAt==='string').slice(0,100).map(x=>({id:x.id,text:x.text,createdAt:x.createdAt,source:x.source==='file'?'file':'dictation',...(x.source==='file'?transcriptDetails(x):{})})) : [];
+    return Array.isArray(data) ? data.filter((x):x is HistoryItem=> !!x && typeof x.text==='string' && typeof x.id==='string' && typeof x.createdAt==='string').map(x=>({id:x.id,text:x.text,createdAt:x.createdAt,source:x.source==='file'?'file':'dictation',...(x.pinned===true?{pinned:true}:{}),...(x.source==='file'?transcriptDetails(x):{})})) : [];
   }
   async addHistory(text: string, source: 'dictation'|'file', details?: unknown): Promise<HistoryItem> {
     const item: HistoryItem={id:randomUUID(),text,source,createdAt:new Date().toISOString(),...(source==='file'?transcriptDetails(details):{})};
-    await this.serial(async()=> { const old=await this.history(); await this.atomic('history.json',[item,...old].slice(0,100)); });
+    await this.serial(async()=> {
+      const old=await this.history();const {historyLimit}=await this.settings();
+      let ordinary=0;
+      await this.atomic('history.json',[item,...old].filter(entry=>entry.pinned || ++ordinary<=historyLimit));
+    });
     return item;
   }
-  clearHistory(): Promise<void> { return this.write('history.json',[]); }
+  clearHistory(keepPinned=false): Promise<void> { return this.serial(async () => {
+    await mkdir(this.root,{recursive:true});
+    const items=await this.history();
+    const retained=keepPinned ? items.filter(item=>item.pinned) : [];
+    // An explicitly cleared history must not reappear during recovery.
+    await this.replace('history.json.bak', JSON.stringify(retained,null,2));
+    await this.replace('history.json', JSON.stringify(retained,null,2));
+  }); }
+  pinHistory(id:string,pinned:boolean):Promise<void> {return this.serial(async()=>{
+    const items=await this.history();const item=items.find(item=>item.id===id);
+    if(!item)throw new Error('Запись больше не найдена в истории');
+    if(pinned)item.pinned=true;else delete item.pinned;
+    await this.atomic('history.json',items);
+  });}
   async updateHistory(id: string, text: string, details?: unknown): Promise<HistoryItem> {
     let updated: HistoryItem | undefined;
     await this.serial(async()=>{
@@ -62,7 +81,7 @@ export class Storage {
       const index=items.findIndex(item=>item.id===id);
       if(index<0)throw new Error('Запись больше не найдена в истории');
       const old=items[index];
-      updated={id:old.id,createdAt:old.createdAt,source:old.source,text,...(old.source==='file'?transcriptDetails(details):{})};
+      updated={id:old.id,createdAt:old.createdAt,source:old.source,text,...(old.pinned?{pinned:true}:{}),...(old.source==='file'?transcriptDetails(details):{})};
       items[index]=updated;
       await this.atomic('history.json',items);
     });
@@ -91,13 +110,52 @@ export class Storage {
     await writeFile(temp,Buffer.from(data)); await rename(temp,path.join(dir,name));
   }
   private async read(name:string,fallback:unknown):Promise<unknown> {
-    try { return JSON.parse(await readFile(path.join(this.root,name),'utf8')); }
-    catch(e) { if((e as NodeJS.ErrnoException).code==='ENOENT' || e instanceof SyntaxError) return fallback; throw e; }
+    const pending = this.reads.get(name);
+    if (pending) return pending;
+    const run = this.readRecovering(name, fallback);
+    this.reads.set(name, run);
+    try { return await run; } finally { this.reads.delete(name); }
+  }
+  private parse(name: string, text: string): unknown {
+    const value: unknown = JSON.parse(text);
+    if (name === 'history.json' ? !Array.isArray(value) : !value || typeof value !== 'object' || Array.isArray(value)) throw new SyntaxError('Invalid storage document');
+    if (name === 'history.json' && (value as unknown[]).some(item=>!item || typeof item!=='object' || typeof (item as HistoryItem).id!=='string' || typeof (item as HistoryItem).text!=='string' || typeof (item as HistoryItem).createdAt!=='string')) throw new SyntaxError('Invalid history entry');
+    return value;
+  }
+  private async readRecovering(name: string, fallback: unknown): Promise<unknown> {
+    let original: string | undefined;
+    try {
+      original = await readFile(path.join(this.root, name), 'utf8');
+      return this.parse(name, original);
+    } catch (error) {
+      if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    let backup: string;
+    let value: unknown;
+    try {
+      backup = await readFile(path.join(this.root, name + '.bak'), 'utf8');
+      value = this.parse(name, backup);
+    } catch (error) {
+      if (original === undefined && (error as NodeJS.ErrnoException).code === 'ENOENT') return fallback;
+      throw new Error(`Не удалось восстановить ${name}. Исходные файлы сохранены в ${this.root}. Сохранение остановлено, чтобы не потерять данные.`);
+    }
+    if (original !== undefined) await writeFile(path.join(this.root, `${name}.${randomUUID()}.corrupt`), original, 'utf8');
+    await this.replace(name, backup);
+    this.recovered(`${name} восстановлен из резервной копии. Последние изменения могли не сохраниться. Повреждённый оригинал, если он был, сохранён в ${this.root}.`);
+    return value;
   }
   private serial<T>(run:()=>Promise<T>):Promise<T> { const next=this.queue.then(run,run); this.queue=next.catch(()=>{}); return next; }
   private write(name:string,value:unknown):Promise<void> { return this.serial(()=>this.atomic(name,value)); }
   private async atomic(name:string,value:unknown):Promise<void> {
-    await mkdir(this.root,{recursive:true}); const file=path.join(this.root,name); const temp=`${file}.tmp`;
-    await writeFile(temp,JSON.stringify(value,null,2),'utf8'); await rename(temp,file);
+    await mkdir(this.root,{recursive:true});
+    const previous = await this.read(name, value);
+    await this.replace(name + '.bak', JSON.stringify(previous, null, 2));
+    await this.replace(name, JSON.stringify(value, null, 2));
+  }
+  private async replace(name: string, text: string): Promise<void> {
+    const file = path.join(this.root, name);
+    const temp = `${file}.${randomUUID()}.tmp`;
+    await writeFile(temp, text, 'utf8');
+    await rename(temp, file);
   }
 }

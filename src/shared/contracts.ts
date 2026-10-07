@@ -9,14 +9,16 @@ export interface Settings {
   microphone: string; voiceCommands: boolean; replacements: string;
   silenceSeconds: number; live: boolean; sounds: boolean; warmup: boolean;
   startAtLogin: boolean; diarization: boolean;
+  historyLimit: number;
 }
 export const DEFAULT_SETTINGS: Settings = {
   llmEnabled: false, llmBaseUrl: 'https://api.openai.com/v1', llmModel: '',
   model: 'auto', device: 'auto', language: 'ru', language2: '', microphone: '',
   voiceCommands: false, replacements: '', silenceSeconds: 0, live: false,
   sounds: true, warmup: false, startAtLogin: false, diarization: true,
+  historyLimit: 100,
 };
-export interface HistoryItem extends TranscriptDetails { id: string; text: string; createdAt: string; source: 'dictation' | 'file'; }
+export interface HistoryItem extends TranscriptDetails { id: string; text: string; createdAt: string; source: 'dictation' | 'file'; pinned?: boolean; }
 export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'error';
 export interface Status { phase: Phase; message: string; seconds?: number; level?: number; progress?: number; remainingSeconds?: number; }
 export type Command =
@@ -36,6 +38,7 @@ export interface ScribeAPI {
   onUpdateState(handler: (state: import('./updates').UpdateState) => void): () => void;
   listModels(): Promise<string[]>;
   proofread(text: string, mode?: import('./proofread').ProofreadMode): Promise<import('./proofread').ProofreadResult>;
+  proofreadBatch(batch: import('./proofread-batch').ProofreadBatch): Promise<import('./proofread-batch').ProofreadCueResult[]>;
   cancelProofread(): Promise<void>;
   saveApiKey(key: string): Promise<void>;
   hasApiKey(): Promise<boolean>;
@@ -45,7 +48,9 @@ export interface ScribeAPI {
   getHistory(): Promise<HistoryItem[]>;
   addHistory(text: string, source: 'dictation' | 'file', details?: TranscriptDetails): Promise<HistoryItem>;
   updateHistory(id: string, text: string, details?: TranscriptDetails): Promise<HistoryItem>;
-  clearHistory(): Promise<void>;
+  clearHistory(keepPinned?: boolean): Promise<void>;
+  pinHistory(id: string, pinned: boolean): Promise<void>;
+  exportHistory(): Promise<boolean>;
   deliver(text: string, target: string | null, enter: boolean): Promise<Delivery>;
   copy(text: string): Promise<void>;
   saveText(text: string): Promise<boolean>;
@@ -53,7 +58,13 @@ export interface ScribeAPI {
   diarize(pcm: Float32Array, speakerCount?: number): Promise<SpeakerTurn[]>;
   cancelDiarization(): Promise<void>;
   onDiarizationProgress(handler: (progress: SpeakerProgress) => void): () => void;
-  pickAudio(): Promise<{name: string; data: ArrayBuffer} | null>;
+  pickAudio(): Promise<import('../main/audio-import').AudioFile | null>;
+  droppedAudio(file: File): Promise<import('../main/audio-import').AudioFile>;
+  prepareAudio(id: string): Promise<{samples: number; duration: number}>;
+  audioChunk(id: string, offset: number): Promise<Float32Array>;
+  releaseAudio(id: string): Promise<void>;
+  cancelAudio(): Promise<void>;
+  diarizeAudio(id: string, speakerCount?: number): Promise<SpeakerTurn[]>;
   status(value: Status): void;
   hide(): void;
   onCommand(handler: (command: Command) => void): () => void;
@@ -61,5 +72,8 @@ export interface ScribeAPI {
   cacheHas(key: string): Promise<boolean>;
   cachePut(key: string, data: ArrayBuffer): Promise<void>;
   getAppInfo(): Promise<{version: string; dataPath: string; nativeReady: boolean}>;
+  getNativeHealth(): Promise<import('../main/native-recovery').NativeHealth>;
+  restartNative(): Promise<void>;
+  onNativeHealth(handler: (state: import('../main/native-recovery').NativeHealth)=>void): () => void;
 }
 declare global { interface Window { scribe: ScribeAPI; } }

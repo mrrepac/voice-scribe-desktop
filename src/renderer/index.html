@@ -8,6 +8,18 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <dialog id="history-clear-dialog" class="correction-dialog" aria-labelledby="history-clear-title">
+    <form method="dialog">
+      <h2 id="history-clear-title">Очистить историю?</h2>
+      <p>Перед удалением можно сохранить всю историю в текстовый файл. Если отменить экспорт, история останется.</p>
+      <label><input id="history-keep-pinned" type="checkbox" checked> Сохранить закреплённые записи</label>
+      <div class="actions">
+        <button class="text-button" value="cancel">Отмена</button>
+        <button class="text-button danger" value="clear">Удалить</button>
+        <button class="button" value="export">Экспортировать и удалить</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="file-options-dialog" class="correction-dialog" aria-labelledby="file-options-title">
     <form method="dialog" id="file-options-form">
       <h2 id="file-options-title">Расшифровать файл</h2>
@@ -49,7 +61,7 @@
             <span class="timer" id="timer" aria-label="Длительность записи">00:00</span>
           </div>
         </div>
-        <p class="file-drop-hint">Перетащите сюда аудио или видео для расшифровки · до 250 МБ</p>
+        <p class="file-drop-hint">Перетащите сюда аудио или видео · до 250 МБ и 2 часов</p>
         <h2 id="record-title" class="sr-only">Диктовка</h2>
         <p id="record-description" class="session-detail"></p>
         <div class="waveform" id="waveform" aria-hidden="true"></div>
@@ -175,6 +187,12 @@
           </div>
           <div class="settings-group">
             <div class="group-heading"><h2>Приложение</h2></div>
+            <label class="field">Хранить обычных записей
+              <select name="historyLimit"><option value="100">100</option><option value="500">500</option><option value="1000">1000</option><option value="5000">5000</option></select>
+              <small>Закреплённые записи хранятся сверх лимита. Самые старые обычные записи удаляются при добавлении новых. Перед уменьшением лимита экспортируйте историю.</small>
+            </label>
+            <p id="native-health" class="inline-notice" role="status">Подключаем горячие клавиши…</p>
+            <button type="button" class="text-button" id="native-restart">Подключить заново</button>
             <div class="toggle-row"><div><strong>Запускать вместе с Windows</strong><p>Voice Scribe появится в системном трее.</p></div><label class="switch"><input type="checkbox" name="startAtLogin" aria-label="Запускать вместе с Windows"><span></span></label></div>
             <div class="settings-footnote">Интернет нужен для первой загрузки модели. Распознавание работает на этом компьютере.<p id="data-path"></p><small id="version">Voice Scribe</small></div>
           </div>
@@ -195,7 +213,7 @@
         <dl class="shortcut-list">
           <div><dt><kbd>Ctrl + Space</kbd></dt><dd>Начать или завершить запись.</dd></div>
           <div><dt>Удерживайте <kbd>Ctrl + Space</kbd></dt><dd>Диктуйте короткую фразу. Отпустите клавиши, чтобы завершить запись.</dd></div>
-          <div><dt><kbd>Ctrl + Shift + Space</kbd></dt><dd>В другом приложении — завершить диктовку, исправить текст по контексту и вставить без Enter и пометок. В Scribe — вычитать с показом изменений и сомнительных мест, без вставки во внешнее окно. Вне записи сочетание работает только в Scribe. Фразы с таймкодами вычитываются отдельно.</dd></div>
+          <div><dt><kbd>Ctrl + Shift + Space</kbd></dt><dd>В другом приложении — завершить диктовку, исправить текст по контексту и вставить без Enter и пометок. В Scribe — вычитать с показом изменений и сомнительных мест, без вставки во внешнее окно. Вне записи сочетание работает только в Scribe. Фразы с таймкодами вычитываются группами с соседним контекстом.</dd></div>
           <div><dt><kbd>Esc</kbd></dt><dd>Отменить запись или распознавание.</dd></div>
         </dl>
       </details>

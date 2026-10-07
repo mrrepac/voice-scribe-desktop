@@ -1,4 +1,6 @@
 import { AsrClient, decodeAudioTo16kMono, type ProgressInfo } from '../asr/client';
+import { appendFileTranscript } from '../asr/file-transcript';
+import { makeProofreadBatches } from '../shared/proofread-batch';
 import { Recorder } from '../asr/recorder';
 import { DEFAULT_SETTINGS, type Settings, type HistoryItem, type Phase, type Command } from '../shared/contracts';
 import { applyVoiceCommands, applyReplacements, parseReplacements } from '../shared/clean';
@@ -164,10 +166,9 @@ function renderWork() {
   }
   return { seconds, progress, remainingSeconds };
 }
-let historyClearArmed = false;
-let clearTimer: ReturnType<typeof setTimeout> | null = null;
+let historyClearing = false;
 
-const isBusy = () => !['idle', 'error'].includes(phase);
+const isBusy = () => historyClearing || !['idle', 'error'].includes(phase);
 const valid = (token: number) => token === generation;
 const modelName = (model: Settings['model']) => model === 'auto' ? 'Авто' : model[0].toUpperCase() + model.slice(1);
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
@@ -220,7 +221,8 @@ function setPhase(value: Phase, message?: string): void {
   resultText.readOnly = isBusy() || editor.segments.length > 0;
   for (const input of document.querySelectorAll<HTMLInputElement>('.segment-speaker')) input.disabled = isBusy();
   for (const input of document.querySelectorAll<HTMLTextAreaElement>('.segment-text')) input.readOnly = isBusy();
-  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-open-history]')) button.disabled = isBusy();
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-open-history], [data-pin-history]')) button.disabled = isBusy();
+  $<HTMLButtonElement>('clear-history').disabled = !history.length || isBusy();
   syncResultActions();
   renderUpdate();
   if (value !== 'recording') bars.forEach(bar => { bar.style.removeProperty('transform'); });
@@ -539,7 +541,7 @@ async function complete(text: string, source: 'dictation' | 'file', token: numbe
   try {
     const item = await api.addHistory(text, source, details);
     historyId = item.id;
-    history = [item, ...history.filter(previous => previous.id !== item.id)];
+    history = await api.getHistory();
     renderHistory();
     if (!valid(token)) return;
   } catch (error) {
@@ -686,10 +688,12 @@ async function finish(enter = false): Promise<void> {
 }
 
 function cancel(message = 'Диктовка отменена'): void {
+  if(historyClearing)return;
   if (!isBusy()) return;
   if (fileOptionsDialog.open) fileOptionsDialog.close('cancel');
   generation++;
   void api.cancelProofread().catch(() => {});
+  void api.cancelAudio().catch(() => {});
   gesture.reset();
   session?.recorder.cancel();
   session = null;
@@ -717,16 +721,19 @@ async function prepare(): Promise<void> {
 }
 
 async function pickFile(dropped?: File): Promise<void> {
+  if($<HTMLDialogElement>('history-clear-dialog').open)return;
   if (!initialized || isBusy() || correctionDialog.open || correctionSaving) return;
   const token = ++generation;
   const options = { ...settings };
   setPhase('starting', 'Выберите аудио или видео');
   $('record-title').textContent = 'Выберите аудиозапись';
   $('record-description').textContent = 'WAV, MP3, M4A, OGG или WebM.';
+  let audioId: string | undefined;
   try {
     if (dropped && dropped.size > 250 * 1024 * 1024) throw new Error('Файл больше 250 МБ. Разделите запись на части.');
     if (dropped && !/\.(wav|mp3|m4a|ogg|flac|webm|mp4|aac|mov|mkv|avi|m4v|opus)$/i.test(dropped.name)) throw new Error('Перетащите аудио или видео: WAV, MP3, M4A, OGG, FLAC, WebM, MP4, MOV, MKV или AVI.');
-    const file = dropped ? { name: dropped.name, data: await dropped.arrayBuffer() } : await api.pickAudio();
+    const file = dropped ? { name: dropped.name, id: undefined } : await api.pickAudio();
+    audioId = file?.id;
     if (!valid(token)) return;
     if (!file) { setPhase('idle'); return; }
     $('file-options-name').textContent = file.name;
@@ -746,11 +753,20 @@ async function pickFile(dropped?: File): Promise<void> {
     const speakerCount = countInput.value ? Number(countInput.value) : undefined;
     setPhase('transcribing', 'Читаем аудиофайл');
     $('record-description').textContent = file.name;
-    const pcm = await decodeAudioTo16kMono(file.data).catch(() => {
-      throw new Error('Не удалось прочитать звуковую дорожку. Возможно, кодек не поддерживается или в видео нет звука. Попробуйте WAV, MP3 или видео WebM.');
-    });
+    if (dropped) audioId = (await api.droppedAudio(dropped)).id;
+    if (!valid(token) || !audioId) return;
+    const audio = await api.prepareAudio(audioId);
     if (!valid(token)) return;
-    const transcript = await asr.transcribeTimed(pcm, options, progress => messageProgress(progress, token));
+    const transcript: import('../shared/transcript').Transcript = {text:'',segments:[]};
+    for (let offset = 0; offset < audio.samples;) {
+      const pcm = await api.audioChunk(audioId, offset);
+      if (!valid(token)) return;
+      const part = await asr.transcribeTimed(pcm, options, progress => messageProgress(progress.stage==='run' && typeof progress.pct==='number' ? {...progress,pct:(offset+pcm.length*progress.pct/100)/audio.samples*100}:progress, token));
+      if (!valid(token)) return;
+      appendFileTranscript(transcript,part,offset / 16000);
+      offset += pcm.length;
+      $('record-description').textContent = `${file.name} · обработано ${Math.round(offset / audio.samples * 100)}%`;
+    }
     if (!valid(token)) return;
     let segments = normalizeSegments(transcript.segments.map(segment => ({ ...segment, text: processText(segment.text, options) })));
     let speakerNote = '';
@@ -763,7 +779,7 @@ async function pickFile(dropped?: File): Promise<void> {
         $('record-description').textContent = progress.message + '. Аудио остаётся на компьютере.';
       });
       try {
-        const turns = await api.diarize(pcm, speakerCount);
+        const turns = await api.diarizeAudio(audioId, speakerCount);
         if (!valid(token)) return;
         segments = assignSpeakers(segments, turns);
         const count = new Set(turns.map(turn => turn.speaker)).size;
@@ -778,6 +794,7 @@ async function pickFile(dropped?: File): Promise<void> {
     await complete(text, 'file', token, null, false, { segments, name: file.name });
     if (valid(token) && speakerNote) $('result-note').textContent += ' ' + speakerNote;
   } catch (error) { fail(error, token); }
+  finally { if (audioId) await api.releaseAudio(audioId).catch(() => {}); }
 }
 
 async function proofreadEditor(): Promise<void> {
@@ -796,15 +813,16 @@ async function proofreadEditor(): Promise<void> {
     await api.saveSettings(settings);
     if (!valid(token)) return;
     if (corrected.segments.length) {
-      for (let i = 0; i < corrected.segments.length; i++) {
-        const segment = corrected.segments[i];
-        if (!segment.text.trim()) continue;
-        setPhase('transcribing', `Вычитываем фразу ${i + 1} из ${corrected.segments.length}…`);
-        const before = segment.text;
-        const result = await api.proofread(before);
-        segment.text = result.text;
-        reviews.push({before,result,segment:i});
+      const batches=makeProofreadBatches(original.segments);
+      for (let i=0;i<batches.length;i++) {
+        setPhase('transcribing', `Вычитываем группу ${i+1} из ${batches.length}…`);
+        const results=await api.proofreadBatch(batches[i]);
         if (!valid(token)) return;
+        for(const result of results) {
+          const segment=corrected.segments[result.id];
+          reviews.push({before:segment.text,result,segment:result.id});
+          segment.text=result.text;
+        }
       }
     } else {
       const result = await api.proofread(original.text);
@@ -893,6 +911,11 @@ async function checkLlm(modelsOnly: boolean): Promise<void> {
 
 async function handleCommand(command: Command): Promise<void> {
   if (!initialized) { pendingCommands.push(command); return; }
+  if(historyClearing || $<HTMLDialogElement>('history-clear-dialog').open) {
+    gesture.reset();
+    if(command.action==='cancel' && !historyClearing)$<HTMLDialogElement>('history-clear-dialog').close('cancel');
+    return;
+  }
   if (correctionDialog.open || correctionSaving) {
     gesture.reset();
     if (command.action === 'cancel' && !correctionSaving) correctionDialog.close();
@@ -955,9 +978,9 @@ function navigate(view: string): void {
 function renderHistory(): void {
   $('history-count').textContent = String(history.length);
   $<HTMLButtonElement>('export-history').disabled = !history.length;
-  $<HTMLButtonElement>('clear-history').disabled = !history.length;
+  $<HTMLButtonElement>('clear-history').disabled = !history.length || isBusy();
   const query = $<HTMLInputElement>('history-search').value.trim().toLocaleLowerCase();
-  const visible = history.filter(item => `${item.name ?? ''} ${item.text}`.toLocaleLowerCase().includes(query));
+  const visible = history.filter(item => `${item.name ?? ''} ${item.text}`.toLocaleLowerCase().includes(query)).sort((a,b)=>Number(Boolean(b.pinned))-Number(Boolean(a.pinned)));
   $('history-list').replaceChildren();
   $('history-empty').hidden = visible.length > 0;
   $('history-empty').querySelector('h2')!.textContent = query ? 'Ничего не найдено' : 'История пуста';
@@ -990,7 +1013,22 @@ function renderHistory(): void {
     copy.className = 'text-button';
     copy.textContent = 'Копировать';
     copy.addEventListener('click', () => void copyText(item.text));
-    actions.append(open, copy);
+    const pin=document.createElement('button');
+    pin.dataset.pinHistory=item.id;
+    pin.className='text-button';pin.textContent=item.pinned?'Открепить':'Закрепить';
+    pin.setAttribute('aria-pressed',String(Boolean(item.pinned)));
+    pin.disabled=isBusy();
+    pin.addEventListener('click',()=>{
+      if(isBusy())return;
+      pin.disabled=true;
+      flushHistorySave();
+      historySaving=historySaving.then(async()=>{
+        try{await api.pinHistory(item.id,!item.pinned);history=await api.getHistory();}
+        catch(error){toast(friendlyError(error),true);}
+        finally{renderHistory();}
+      });
+    });
+    actions.append(open, copy, pin);
     meta.append(date, actions);
     const body = document.createElement('p');
     body.className = 'history-text';
@@ -1025,7 +1063,7 @@ function queueSettingsSave(): void {
   for (const name of Object.keys(next) as Array<keyof Settings>) {
     const control = form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
     if (!control) continue;
-    const value = control instanceof HTMLInputElement && control.type === 'checkbox' ? control.checked : name === 'silenceSeconds' ? Number(control.value) : control.value;
+    const value = control instanceof HTMLInputElement && control.type === 'checkbox' ? control.checked : name === 'silenceSeconds' || name === 'historyLimit' ? Number(control.value) : control.value;
     (next as unknown as Record<string, unknown>)[name] = value;
   }
   if (next.language === 'auto') next.language2 = '';
@@ -1227,32 +1265,43 @@ resultText.addEventListener('input', () => {
 resultText.addEventListener('change', flushHistorySave);
 $('history-search').addEventListener('input', renderHistory);
 $('export-history').addEventListener('click', () => {
-  const text = history.map(item => `${new Date(item.createdAt).toLocaleString('ru-RU')} · ${item.source === 'file' ? 'Аудиофайл' : 'Диктовка'}\n\n${item.text}`).join('\n\n────────────────────────\n\n');
-  void api.saveText(text).catch(error => toast(friendlyError(error), true));
+  flushHistorySave();
+  void historySaving.then(()=>api.exportHistory()).catch(error=>toast(friendlyError(error),true));
 });
 $('clear-history').addEventListener('click', () => {
-  if (!historyClearArmed) {
-    historyClearArmed = true;
-    $('clear-history').textContent = 'Удалить всю историю?';
-    clearTimer = setTimeout(() => { historyClearArmed = false; $('clear-history').textContent = 'Очистить'; }, 5000);
-    return;
-  }
-  if (clearTimer) clearTimeout(clearTimer);
-  historyClearArmed = false;
-  $('clear-history').textContent = 'Очистить';
+  if(isBusy())return;
+  const dialog=$<HTMLDialogElement>('history-clear-dialog');
+  if(dialog.open)return;
+  dialog.returnValue='cancel';dialog.showModal();
+});
+$('history-clear-dialog').addEventListener('close',()=>{
+  const choice=$<HTMLDialogElement>('history-clear-dialog').returnValue;
+  if(choice!=='clear' && choice!=='export')return;
+  const keepPinned=$<HTMLInputElement>('history-keep-pinned').checked;
+  historyClearing=true;
+  document.querySelector('main')!.inert=true;
   flushHistorySave();
   historySaving = historySaving.then(async () => {
     try {
-      await api.clearHistory();
-      history = [];
-      currentHistoryId = undefined;
-      previousEditor.historyId = undefined;
+      if(choice==='export' && !(await api.exportHistory()))return;
+      await api.clearHistory(keepPinned);
+      history = await api.getHistory();
+      if(!history.some(item=>item.id===currentHistoryId))currentHistoryId = undefined;
+      if(!history.some(item=>item.id===previousEditor.historyId))previousEditor.historyId = undefined;
       renderHistory();
-      toast('История очищена.');
+      toast(keepPinned?'Обычные записи удалены. Закреплённые сохранены.':'История очищена.');
     } catch (error) { toast(friendlyError(error), true); }
+    finally {historyClearing=false;document.querySelector('main')!.inert=false;renderHistory();}
   });
 });
 $('refresh-mics').addEventListener('click', () => void refreshMicrophones());
+function renderNativeHealth(state: import('../main/native-recovery').NativeHealth): void {
+  $('native-health').textContent=state.message;
+  $<HTMLButtonElement>('native-restart').disabled=state.retrying;
+}
+$('native-restart').addEventListener('click',()=>{void api.restartNative().catch(error=>toast(friendlyError(error),true));});
+const unsubscribeNative=api.onNativeHealth(renderNativeHealth);
+void api.getNativeHealth().then(renderNativeHealth).catch(()=>{});
 form.addEventListener('submit', event => event.preventDefault());
 form.addEventListener('change', queueSettingsSave);
 form.querySelector('[name="replacements"]')?.addEventListener('input', queueSettingsSave);
@@ -1270,6 +1319,7 @@ $('update-notice-action').addEventListener('click', () => {
   else void api.downloadUpdate().then(renderUpdate).catch(error => toast(friendlyError(error), true));
 });
 window.addEventListener('beforeunload', () => {
+  unsubscribeNative();
   flushHistorySave();
   clearInterval(ticker);
   unsubscribe();
