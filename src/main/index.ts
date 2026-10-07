@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { Storage } from './storage';
 import { DiarizationService } from './diarization';
 import { GigaamService } from './gigaam';
+import { ModelStore } from './models';
 import { NativeBridge } from './native';
 import type { Command, Status } from '../shared/contracts';
 import { formatSubtitles, normalizeSegments, subtitleFilename } from '../shared/transcript';
@@ -49,6 +50,7 @@ const storage=new Storage(app.getPath('userData'),process.env.LOCALAPPDATA ? pat
   void dialog.showMessageBox({type:'warning',title:'Восстановление данных Voice Scribe',message});
 });
 const diarization=new DiarizationService(path.join(root,'dist/diarization-worker.cjs'),path.join(app.getPath('userData'),'models','speakers'));
+const models=new ModelStore(path.join(app.getPath('userData'),'models'),process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA,'voice-scribe','models') : undefined);
 const gigaam=new GigaamService(path.join(root,'dist/gigaam-worker.cjs'),path.join(app.getPath('userData'),'models','gigaam-v3-punct'));
 const audioImport = new AudioImport(app.isPackaged ? path.join(process.resourcesPath,'ffmpeg.exe') : path.join(root,'node_modules/ffmpeg-static/ffmpeg.exe'), path.join(app.getPath('userData'),'audio-temp'));
 const trusted=(url:string)=>{try { const u=new URL(url); return u.protocol==='scribe:' && u.host==='app'; } catch { return false; }};
@@ -256,6 +258,13 @@ function setupIpc():void {
   handle('gigaam:prepare',()=>gigaam.prepare(gigaamProgress));
   handle('gigaam:recognize',(pcm,timed)=>gigaam.recognize(pcm,timed===true,gigaamProgress));
   handle('gigaam:cancel',()=>gigaam.cancel());
+  handle('models:list',()=>models.list());
+  handle('models:delete',async id=>{
+    // The worker may hold the model open; it reloads (or downloads) on next use.
+    if(id==='gigaam')gigaam.cancel();
+    await models.remove(id);
+    return models.list();
+  });
   handle('audio:select',source=>audioImport.select(textArg(source)));
   handle('audio:prepare',id=>audioImport.prepare(textArg(id)));
   handle('audio:chunk',(id,offset)=>audioImport.chunk(textArg(id),offset));

@@ -63,6 +63,8 @@ export interface ScribeAPI {
   prepareGigaam(): Promise<void>;
   recognizeGigaam(pcm: Float32Array, timed: boolean): Promise<import('./transcript').Transcript>;
   cancelGigaam(): Promise<void>;
+  listDownloadedModels(): Promise<import('./models').ModelEntry[]>;
+  deleteDownloadedModel(id: import('./models').ModelId): Promise<import('./models').ModelEntry[]>;
   onGigaamProgress(handler: (progress: import('./gigaam').GigaamProgress) => void): () => void;
   onDiarizationProgress(handler: (progress: SpeakerProgress) => void): () => void;
   pickAudio(): Promise<import('../main/audio-import').AudioFile | null>;

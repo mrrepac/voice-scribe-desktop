@@ -146,9 +146,14 @@
                 <small>Для фраз, в которых вы переключаетесь между языками.</small>
               </label>
             </div>
-            <div class="toggle-row"><div><strong>Определять ораторов в аудиофайлах</strong><p>Метки «Оратор 1», «Оратор 2» в тексте и субтитрах. Первая загрузка — около 36 МБ; далее работает без интернета. До 2 часов аудио.</p></div><label class="switch"><input type="checkbox" name="diarization" aria-label="Определять ораторов в аудиофайлах"><span></span></label></div>
+            <div class="toggle-row"><div><strong>Определять ораторов в аудиофайлах</strong><p>Метки «Оратор 1», «Оратор 2» в тексте и субтитрах. Первая загрузка — около 107 МБ; далее работает без интернета. До 2 часов аудио.</p></div><label class="switch"><input type="checkbox" name="diarization" aria-label="Определять ораторов в аудиофайлах"><span></span></label></div>
             <div class="toggle-row"><div><strong>Предпросмотр по фразам</strong><p>Текст появляется в паузах. В поле вставляется один раз, после остановки.</p></div><label class="switch"><input type="checkbox" name="live" aria-label="Предпросмотр по фразам"><span></span></label></div>
             <div class="toggle-row"><div><strong>Готовить модель при запуске</strong><p>Первый результат будет быстрее. Использует память компьютера.</p></div><label class="switch"><input type="checkbox" name="warmup" aria-label="Готовить модель при запуске"><span></span></label></div>
+          </div>
+          <div class="settings-group">
+            <div class="group-heading"><h2>Модели на диске</h2><p>Удалённая модель загрузится снова, когда понадобится.</p></div>
+            <ul class="model-files" id="model-files" aria-label="Загруженные модели"></ul>
+            <p class="settings-footnote" id="model-files-empty" hidden>Загруженных моделей пока нет.</p>
           </div>
           <div class="settings-group">
             <div class="group-heading"><h2>Микрофон и диктовка</h2></div>

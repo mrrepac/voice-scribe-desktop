@@ -246,3 +246,9 @@ fieldset:disabled .switch { opacity: .42; }
 @keyframes work-spin { to { transform: rotate(360deg); } }
 .update-notice { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12px; }
 .update-notice span { flex: 1; min-width: 200px; }
+.model-files { list-style: none; margin: 0; padding: 0; }
+.model-file { display: flex; align-items: center; gap: 12px; min-height: 34px; border-bottom: 1px solid var(--line); }
+.model-file:last-child { border-bottom: 0; }
+.model-file-name { flex: 1; min-width: 0; font-size: 12px; }
+.model-file-size { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.model-file-note { color: var(--muted); font-size: 11px; }

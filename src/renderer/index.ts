@@ -16,6 +16,7 @@ import { PROVIDERS, providerFor } from '../shared/providers';
 import { renderReview, type ReviewBlock } from './proofread-review';
 import type { ProofreadResult, ProofreadMode } from '../shared/proofread';
 import { WorkProgress } from '../shared/work-progress';
+import type { ModelEntry } from '../shared/models';
 import type { UpdateState } from '../shared/updates';
 import { HOTKEYS } from '../shared/hotkeys';
 
@@ -1035,7 +1036,7 @@ function navigate(view: string): void {
   }
   $('page-name').textContent = ({ dictation: 'Диктовка', history: 'История', settings: 'Настройки' } as Record<string, string>)[view];
   if (view === 'history') renderHistory();
-  if (view === 'settings') void refreshMicrophones();
+  if (view === 'settings') { void refreshMicrophones(); void refreshModelFiles(); }
   $('view-' + view).scrollTop = 0;
   window.scrollTo(0, 0);
 }
@@ -1185,6 +1186,69 @@ async function refreshMicrophones(): Promise<void> {
     if (current && !Array.from(select.options).some(option => option.value === current)) select.append(new Option('Выбранный микрофон (сейчас недоступен)', current));
     select.value = current;
   } catch { /* Permission may not be granted before the first recording. */ }
+}
+
+const formatBytes = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1).replace('.', ',')} ГБ` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} МБ`;
+
+function renderModelFiles(entries: ModelEntry[]): void {
+  $('model-files-empty').hidden = entries.length > 0;
+  $('model-files').replaceChildren(...entries.map(entry => {
+    const row = document.createElement('li');
+    row.className = 'model-file';
+    const name = document.createElement('span');
+    name.className = 'model-file-name';
+    name.textContent = entry.name;
+    const size = document.createElement('span');
+    size.className = 'model-file-size';
+    size.textContent = formatBytes(entry.bytes);
+    row.append(name, size);
+    if (!entry.removable) {
+      const note = document.createElement('span');
+      note.className = 'model-file-note';
+      note.textContent = 'только чтение';
+      note.title = 'Voice Scribe читает этот кэш, но не меняет его.';
+      row.append(note);
+      return row;
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'text-button danger';
+    remove.textContent = 'Удалить';
+    let armed: ReturnType<typeof setTimeout> | null = null;
+    remove.addEventListener('click', () => {
+      if (isBusy()) return;
+      // The second click within four seconds confirms; downloads can be large.
+      if (!armed) {
+        remove.textContent = 'Точно удалить?';
+        armed = setTimeout(() => { armed = null; remove.textContent = 'Удалить'; }, 4000);
+        return;
+      }
+      clearTimeout(armed);
+      armed = null;
+      void deleteModelFiles(entry);
+    });
+    row.append(remove);
+    return row;
+  }));
+}
+
+async function refreshModelFiles(): Promise<void> {
+  try { renderModelFiles(await api.listDownloadedModels()); }
+  catch (error) { toast(`Не удалось прочитать список моделей: ${friendlyError(error)}`, true); }
+}
+
+async function deleteModelFiles(entry: ModelEntry): Promise<void> {
+  if (isBusy() || entry.id === 'legacy') return;
+  try {
+    renderModelFiles(await api.deleteDownloadedModel(entry.id));
+    // A loaded pipeline may use the deleted files; the next recognition reloads them.
+    asr.cancel();
+    $('setup-card').hidden = false;
+    toast(`${entry.name}: файлы удалены. Модель загрузится снова, когда понадобится.`);
+  } catch (error) {
+    toast(`Не удалось удалить модель: ${friendlyError(error)}`, true);
+    void refreshModelFiles();
+  }
 }
 
 async function copyText(text: string): Promise<void> {
