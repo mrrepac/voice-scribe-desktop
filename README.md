@@ -256,7 +256,8 @@ npm start
 ```powershell
 npm run build       # приложение и нативный помощник
 npm run pack        # release/win-unpacked
-npm run dist        # portable EXE
+npm run dist        # установщик Setup с автообновлением
+npm run dist:portable # отдельный portable EXE
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/native-smoke.ps1
 ```
 
