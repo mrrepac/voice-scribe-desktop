@@ -20,7 +20,7 @@ export function validateSettings(raw: unknown): Settings {
   if (typeof v.llmEnabled === 'boolean') s.llmEnabled = v.llmEnabled;
   if (typeof v.llmBaseUrl === 'string') s.llmBaseUrl = v.llmBaseUrl.trim().slice(0,2000);
   if (typeof v.llmModel === 'string') s.llmModel = v.llmModel.trim().slice(0,300);
-  if (['auto','tiny','base','small','turbo','turbo-hq'].includes(String(v.model))) s.model = v.model as Settings['model'];
+  if (['auto','tiny','base','small','turbo','turbo-hq','gigaam'].includes(String(v.model))) s.model = v.model as Settings['model'];
   if (['auto','wasm','webgpu'].includes(String(v.device))) s.device = v.device as Settings['device'];
   for (const k of ['language','language2','microphone','replacements'] as const) if (typeof v[k] === 'string') s[k] = v[k].slice(0, k === 'replacements' ? 50000 : 300);
   for (const k of ['voiceCommands','live','sounds','warmup','startAtLogin','diarization','restoreClipboard'] as const) if (typeof v[k] === 'boolean') s[k] = v[k];

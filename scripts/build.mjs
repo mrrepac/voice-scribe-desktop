@@ -11,6 +11,7 @@ execFileSync(process.execPath, ['node_modules/ffmpeg-static/install.js'], { stdi
 await mkdir('dist/ort', { recursive: true });
 await build({entryPoints:['src/main/index.ts'],outfile:'dist/main.cjs',platform:'node',format:'cjs',bundle:true,external:['electron','electron-updater'],target:'node22'});
 await build({entryPoints:['src/main/diarization-worker.ts'],outfile:'dist/diarization-worker.cjs',platform:'node',format:'cjs',bundle:true,external:['sherpa-onnx-node'],target:'node22'});
+await build({entryPoints:['src/main/gigaam-worker.ts'],outfile:'dist/gigaam-worker.cjs',platform:'node',format:'cjs',bundle:true,external:['sherpa-onnx-node'],target:'node22'});
 await build({entryPoints:['src/main/preload.ts'],outfile:'dist/preload.cjs',platform:'node',format:'cjs',bundle:true,external:['electron'],target:'node22'});
 await build({entryPoints:['src/main/overlay-preload.ts'],outfile:'dist/overlay-preload.cjs',platform:'node',format:'cjs',bundle:true,external:['electron'],target:'node22'});
 await build({entryPoints:['src/renderer/index.ts'],outfile:'dist/renderer.js',platform:'browser',format:'esm',bundle:true,target:'chrome130'});
@@ -18,6 +19,7 @@ await build({entryPoints:['src/asr/worker.ts'],outfile:'dist/asr-worker.js',plat
 if(process.argv.includes('--smoke')) {
   await build({entryPoints:['src/asr/smoke.ts'],outfile:'dist/smoke.js',platform:'browser',format:'esm',bundle:true,target:'chrome130'});
   if(existsSync('artifacts/fixture.wav'))await copyFile('artifacts/fixture.wav','dist/fixture.wav');
+  if(existsSync('artifacts/fixture-ru.wav'))await copyFile('artifacts/fixture-ru.wav','dist/fixture-ru.wav');
 }
 // Inline only the icons the app uses. No network or icon font is needed at runtime.
 const iconNames = {

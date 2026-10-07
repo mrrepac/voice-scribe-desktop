@@ -2,7 +2,8 @@ import type { TranscriptDetails, TranscriptSegment, SubtitleFormat } from './tra
 import type { SpeakerTurn, SpeakerProgress } from './speakers';
 import type { RememberedCorrection } from './corrections';
 import type { Hotkey } from './hotkeys';
-export type Model = 'auto' | 'tiny' | 'base' | 'small' | 'turbo' | 'turbo-hq';
+/** gigaam: GigaAM v3 for Russian via sherpa-onnx on the CPU; all others are Whisper sizes. */
+export type Model = 'auto' | 'tiny' | 'base' | 'small' | 'turbo' | 'turbo-hq' | 'gigaam';
 export type Device = 'auto' | 'wasm' | 'webgpu';
 export interface Settings {
   llmEnabled: boolean; llmBaseUrl: string; llmModel: string;
@@ -59,6 +60,10 @@ export interface ScribeAPI {
   saveSubtitles(segments: TranscriptSegment[], format: SubtitleFormat, name?: string): Promise<boolean>;
   diarize(pcm: Float32Array, speakerCount?: number): Promise<SpeakerTurn[]>;
   cancelDiarization(): Promise<void>;
+  prepareGigaam(): Promise<void>;
+  recognizeGigaam(pcm: Float32Array, timed: boolean): Promise<import('./transcript').Transcript>;
+  cancelGigaam(): Promise<void>;
+  onGigaamProgress(handler: (progress: import('./gigaam').GigaamProgress) => void): () => void;
   onDiarizationProgress(handler: (progress: SpeakerProgress) => void): () => void;
   pickAudio(): Promise<import('../main/audio-import').AudioFile | null>;
   droppedAudio(file: File): Promise<import('../main/audio-import').AudioFile>;

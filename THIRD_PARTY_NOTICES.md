@@ -49,3 +49,10 @@ The TitaNet model is used unmodified in the ONNX conversion published there.
 Model revisions and SHA-256 digests are pinned in src/main/diarization-worker.ts.
 Sources: https://github.com/k2-fsa/sherpa-onnx and
 https://huggingface.co/nvidia/speakerverification_en_titanet_large.
+
+The optional GigaAM v3 recognizer for Russian (GigaChat Team, Sber; MIT;
+licenses/gigaam-LICENSE.txt) also runs on sherpa-onnx-node. Its ONNX conversion
+with punctuation is downloaded separately from csukuangfj's Hugging Face
+repository sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16 when
+the model is first selected. The revision and SHA-256 digests are pinned in
+src/main/gigaam-worker.ts. Source: https://github.com/salute-developers/GigaAM.

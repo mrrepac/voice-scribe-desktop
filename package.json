@@ -39,6 +39,7 @@
       "dist/**/*",
       "!dist/smoke.js",
       "!dist/fixture.wav",
+      "!dist/fixture-ru.wav",
       "package.json",
       "LICENSE",
       "README.md",

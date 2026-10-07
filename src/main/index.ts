@@ -4,6 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Storage } from './storage';
 import { DiarizationService } from './diarization';
+import { GigaamService } from './gigaam';
 import { NativeBridge } from './native';
 import type { Command, Status } from '../shared/contracts';
 import { formatSubtitles, normalizeSegments, subtitleFilename } from '../shared/transcript';
@@ -21,6 +22,7 @@ import { AudioImport } from './audio-import';
 import { NativeRecovery } from './native-recovery';
 import { historySmokeTest } from './history-smoke';
 import { clipboardSmokeTest } from './clipboard-smoke';
+import { gigaamSmokeTest } from './gigaam-smoke';
 import { HOTKEYS, type Hotkey } from '../shared/hotkeys';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -47,6 +49,7 @@ const storage=new Storage(app.getPath('userData'),process.env.LOCALAPPDATA ? pat
   void dialog.showMessageBox({type:'warning',title:'Восстановление данных Voice Scribe',message});
 });
 const diarization=new DiarizationService(path.join(root,'dist/diarization-worker.cjs'),path.join(app.getPath('userData'),'models','speakers'));
+const gigaam=new GigaamService(path.join(root,'dist/gigaam-worker.cjs'),path.join(app.getPath('userData'),'models','gigaam-v3-punct'));
 const audioImport = new AudioImport(app.isPackaged ? path.join(process.resourcesPath,'ffmpeg.exe') : path.join(root,'node_modules/ffmpeg-static/ffmpeg.exe'), path.join(app.getPath('userData'),'audio-temp'));
 const trusted=(url:string)=>{try { const u=new URL(url); return u.protocol==='scribe:' && u.host==='app'; } catch { return false; }};
 const send=(command:Command)=>{if(win && !win.isDestroyed())win.webContents.send('command',command);};
@@ -173,6 +176,8 @@ function setupIpc():void {
     await apiKeys.migrate((await storage.settings()).llmBaseUrl);
     const saved=await storage.saveSettings(value);
     if(saved.hotkey!==hotkey)applyHotkey(saved.hotkey);
+    // Free GigaAM's memory once another model is chosen.
+    if(saved.model!=='gigaam')gigaam.cancel();
     if(app.isPackaged && !smoke) app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,args:['--hidden']});
     return saved;
   });
@@ -247,6 +252,10 @@ function setupIpc():void {
   });
   handle('speakers:run',(pcm,speakerCount)=>diarization.run(pcm,value=>{if(!win.isDestroyed())win.webContents.send('speakers:progress',value);},speakerCount));
   handle('speakers:cancel',()=>diarization.cancel());
+  const gigaamProgress=(value:import('../shared/gigaam').GigaamProgress)=>{if(!win.isDestroyed())win.webContents.send('gigaam:progress',value);};
+  handle('gigaam:prepare',()=>gigaam.prepare(gigaamProgress));
+  handle('gigaam:recognize',(pcm,timed)=>gigaam.recognize(pcm,timed===true,gigaamProgress));
+  handle('gigaam:cancel',()=>gigaam.cancel());
   handle('audio:select',source=>audioImport.select(textArg(source)));
   handle('audio:prepare',id=>audioImport.prepare(textArg(id)));
   handle('audio:chunk',(id,offset)=>audioImport.chunk(textArg(id),offset));
@@ -287,7 +296,7 @@ async function createWindows():Promise<void> {
   win.on('close',event=>{if(!quitting){event.preventDefault();win.hide();}});
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',(event,url)=>{if(!trusted(url))event.preventDefault();});
-  win.webContents.on('render-process-gone',(_event,details)=>{console.error('Renderer stopped',details);diarization.cancel();proofreadController?.abort();void audioImport.cancelAll().catch(error=>console.error('Audio cleanup failed',error));deliveryGeneration++;if(bridge.ready){void bridge.request('cancel-insert').catch(()=>{});void bridge.request('set-active',{active:false}).catch(()=>{});}overlay?.hide();if(!quitting)dialog.showErrorBox('Voice Scribe','Процесс распознавания остановился. Перезапустите приложение. Сохранённая история останется на диске.');});
+  win.webContents.on('render-process-gone',(_event,details)=>{console.error('Renderer stopped',details);diarization.cancel();gigaam.cancel();proofreadController?.abort();void audioImport.cancelAll().catch(error=>console.error('Audio cleanup failed',error));deliveryGeneration++;if(bridge.ready){void bridge.request('cancel-insert').catch(()=>{});void bridge.request('set-active',{active:false}).catch(()=>{});}overlay?.hide();if(!quitting)dialog.showErrorBox('Voice Scribe','Процесс распознавания остановился. Перезапустите приложение. Сохранённая история останется на диске.');});
   overlay=new BrowserWindow({width:430,height:90,show:false,transparent:true,frame:false,focusable:false,skipTaskbar:true,resizable:false,alwaysOnTop:true,webPreferences:{preload:path.join(root,'dist/overlay-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}});
   overlay.setIgnoreMouseEvents(true);
   setupIpc();
@@ -476,6 +485,8 @@ async function smokeTest():Promise<void> {
     if(process.argv.includes('--corrections-test'))await correctionSmokeTest(win);
     if(process.argv.includes('--llm-test'))await llmSmokeTest(win);
     if(process.argv.includes('--history-test'))await historySmokeTest(win);
+    const giga=process.argv.includes('--gigaam-test')?await gigaamSmokeTest(win):undefined;
+    if(giga)console.log('GIGAAM_SMOKE',JSON.stringify(giga));
     if(!bridge.ready)await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Native helper startup timeout')),10000);bridge.once('ready',()=>{clearTimeout(timer);resolve();});bridge.once('failure',message=>{clearTimeout(timer);reject(new Error(message));});});
     if(process.argv.includes('--clipboard-test'))await clipboardSmokeTest(win,bridge);
     const native=await bridge.request('diagnostics');
@@ -492,7 +503,7 @@ else {
   app.on('second-instance',()=>{if(win)show();});
   let audioCleaned = false;
   app.on('before-quit',event=>{
-    quitting=true;diarization.cancel();nativeRecovery.stop();
+    quitting=true;diarization.cancel();gigaam.cancel();nativeRecovery.stop();
     if (!audioCleaned) {
       event.preventDefault();
       void audioImport.cancelAll().catch(error=>console.error('Audio cleanup failed',error)).finally(()=>{audioCleaned=true;app.quit();});

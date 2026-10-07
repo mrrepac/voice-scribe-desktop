@@ -1,4 +1,5 @@
-import { AsrClient, decodeAudioTo16kMono, type ProgressInfo } from '../asr/client';
+import { decodeAudioTo16kMono, type ProgressInfo } from '../asr/client';
+import { Recognizer } from './recognizer';
 import { appendFileTranscript } from '../asr/file-transcript';
 import { makeProofreadBatches, type ProofreadBatch } from '../shared/proofread-batch';
 import { Recorder } from '../asr/recorder';
@@ -24,7 +25,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   return element as T;
 };
 const api = window.scribe;
-const asr = new AsrClient();
+const asr = new Recognizer(api);
 const gesture = new DictationGesture();
 const form = $<HTMLFormElement>('settings-form');
 const fieldset = $<HTMLFieldSetElement>('settings-fieldset');
@@ -176,7 +177,9 @@ let warming = false;
 const isBusy = () => historyClearing || !['idle', 'error'].includes(phase);
 const canStart = () => !historyClearing && (['idle', 'error'].includes(phase) || (phase === 'preparing' && warming));
 const valid = (token: number) => token === generation;
-const modelName = (model: Settings['model']) => model === 'auto' ? 'Авто' : model === 'turbo-hq' ? 'Turbo HQ' : model[0].toUpperCase() + model.slice(1);
+const modelName = (model: Settings['model']) => model === 'auto' ? 'Авто' : model === 'turbo-hq' ? 'Turbo HQ' : model === 'gigaam' ? 'GigaAM v3' : model[0].toUpperCase() + model.slice(1);
+/** GigaAM recognizes Russian only; the language settings apply to Whisper. */
+const engineSummary = (value: Settings) => value.model === 'gigaam' ? 'GigaAM v3 · только русский' : `Whisper · ${modelName(value.model)} · ${value.language === 'auto' ? 'Автоязык' : value.language.toUpperCase()}`;
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
 
 function toast(message: string, error = false): void {
@@ -1121,7 +1124,7 @@ function applySettings(): void {
     if (control instanceof HTMLInputElement && control.type === 'checkbox') control.checked = Boolean(value);
     else control.value = String(value);
   }
-  $('engine-summary').textContent = `Whisper · ${modelName(settings.model)} · ${settings.language === 'auto' ? 'Автоязык' : settings.language.toUpperCase()}`;
+  $('engine-summary').textContent = engineSummary(settings);
   renderHotkeyLabels();
 }
 
@@ -1150,7 +1153,7 @@ function queueSettingsSave(): void {
   if (previous.model !== settings.model || previous.device !== settings.device) {
     $('setup-card').hidden = false;
   }
-  $('engine-summary').textContent = `Whisper · ${modelName(settings.model)} · ${settings.language === 'auto' ? 'Автоязык' : settings.language.toUpperCase()}`;
+  $('engine-summary').textContent = engineSummary(settings);
   form.querySelector<HTMLSelectElement>('[name="language2"]')!.value = settings.language2;
   renderHotkeyLabels();
   $('settings-saved').textContent = 'Сохраняем…';
