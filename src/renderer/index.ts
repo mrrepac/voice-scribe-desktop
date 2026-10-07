@@ -772,11 +772,18 @@ async function pickFile(dropped?: File): Promise<void> {
     const audio = await api.prepareAudio(audioId);
     if (!valid(token)) return;
     const transcript: import('../shared/transcript').Transcript = {text:'',segments:[]};
+    // Auto language costs an extra encoder pass per 30 s chunk. Fix it for the rest
+    // of the file once two chunks in a row agree, so one misdetected intro cannot.
+    let detected: string | undefined;
     for (let offset = 0; offset < audio.samples;) {
       const pcm = await api.audioChunk(audioId, offset);
       if (!valid(token)) return;
       const part = await asr.transcribeTimed(pcm, options, progress => messageProgress(progress.stage==='run' && typeof progress.pct==='number' ? {...progress,pct:(offset+pcm.length*progress.pct/100)/audio.samples*100}:progress, token));
       if (!valid(token)) return;
+      if (options.language === 'auto' && part.language) {
+        if (part.language === detected) options.language = detected;
+        detected = part.language;
+      }
       appendFileTranscript(transcript,part,offset / 16000);
       offset += pcm.length;
       $('record-description').textContent = `${file.name} · обработано ${Math.round(offset / audio.samples * 100)}%`;

@@ -5,11 +5,17 @@ import path from 'node:path';
 
 const RATE = 16000;
 export const MAX_AUDIO_SECONDS = 7200;
-export const AUDIO_CHUNK_SECONDS = 60;
+/** One Whisper window: each chunk is decoded in a single pass, without overlapping strides. */
+export const AUDIO_CHUNK_SECONDS = 30;
+/** A cut is searched in the chunk's last seconds; earlier cuts would shorten every window. */
+const CUT_SEARCH_SECONDS = 10;
+/** 20 ms frames, energy smoothed over 300 ms so the cut lands in a pause, not between syllables. */
+const CUT_FRAME = 320;
+const CUT_SMOOTH_FRAMES = 15;
 export interface AudioFile { id: string; name: string; }
 type Entry = { source: string; preparing?: boolean; directory?: string; pcm?: string; samples?: number };
 
-/** Disk-backed decoding: the renderer receives at most one minute of mono PCM. */
+/** Disk-backed decoding: the renderer receives at most one Whisper window of mono PCM. */
 export class AudioImport {
   private entries = new Map<string, Entry>();
   private jobs = new Map<string, ChildProcess>();
@@ -79,17 +85,7 @@ export class AudioImport {
         read += next.bytesRead;
       }
     } finally { await file.close(); }
-    // Prefer a quiet boundary near the end, avoiding cuts in the middle of words.
-    if (offset + count < entry.samples) {
-      let best = count, energy = Infinity;
-      for (let end = count - 2 * RATE; end <= count; end += 160) {
-        let sum = 0;
-        for (let i = end - 160; i < end; i++) sum += pcm[i] * pcm[i];
-        if (sum < energy) { energy = sum; best = end; }
-      }
-      if (energy / 160 < 0.0001) return pcm.slice(0, best);
-    }
-    return pcm;
+    return offset + count < entry.samples ? pcm.slice(0, quietCut(pcm)) : pcm;
   }
 
   pcmPath(id: string): string {
@@ -111,4 +107,28 @@ export class AudioImport {
     if (!entry) throw new Error('Импорт уже завершён или отменён');
     return entry;
   }
+}
+
+/**
+ * Chunks are transcribed independently, so a cut inside a word loses it. Cut in
+ * the middle of the quietest 300 ms of the last seconds: usually a pause between phrases.
+ */
+export function quietCut(pcm: Float32Array): number {
+  const frames = Math.floor(pcm.length / CUT_FRAME);
+  const first = Math.max(0, frames - CUT_SEARCH_SECONDS * RATE / CUT_FRAME);
+  const energy = new Float64Array(frames);
+  for (let f = first; f < frames; f++) {
+    let sum = 0;
+    for (let i = f * CUT_FRAME; i < (f + 1) * CUT_FRAME; i++) sum += pcm[i] * pcm[i];
+    energy[f] = sum;
+  }
+  let best = frames, lowest = Infinity, window = 0;
+  for (let f = first; f < frames; f++) {
+    window += energy[f];
+    if (f - first >= CUT_SMOOTH_FRAMES) window -= energy[f - CUT_SMOOTH_FRAMES];
+    if (f - first + 1 < CUT_SMOOTH_FRAMES) continue;
+    // "<=" prefers the later of equally quiet pauses, keeping windows long.
+    if (window <= lowest) { lowest = window; best = f + 1 - Math.floor(CUT_SMOOTH_FRAMES / 2); }
+  }
+  return best >= frames ? pcm.length : best * CUT_FRAME;
 }

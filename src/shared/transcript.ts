@@ -1,6 +1,7 @@
 /** Cue positions are seconds from the beginning of the original audio file. */
 export interface TranscriptSegment { start: number; end: number; text: string; speaker?: string; }
-export interface Transcript { text: string; segments: TranscriptSegment[]; }
+/** language: the code Whisper detected when none was given (absent for a fixed or mixed pair). */
+export interface Transcript { text: string; segments: TranscriptSegment[]; language?: string; }
 export type SubtitleFormat = 'srt' | 'vtt';
 export interface TranscriptDetails { segments?: TranscriptSegment[]; name?: string; }
 

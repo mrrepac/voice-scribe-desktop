@@ -554,7 +554,7 @@ async function runAsrResult(
     // делает и сам Whisper.
     if (!pair) {
       const code = await detectLanguage(asr, speech, null);
-      return await runOnce(asr, speech, code, false, onProgress, isCancelled, timed, offset);
+      return { ...await runOnce(asr, speech, code, false, onProgress, isCancelled, timed, offset), language: code };
     }
     return await runMixed(asr, speech, pair, onProgress, isCancelled, timed, offset);
   } catch (e) {
