@@ -280,13 +280,15 @@ let loaded: Loaded | null = null;
 const keyOf = (model: WhisperModel, dev: Device, f16: boolean) => `${model}|${dev}|${f16 ? "f16" : "f32"}`;
 
 /** «Авто» = максимум, который реально тянет это устройство. */
-function resolveAutoModel(device: Device, mobile: boolean): WhisperModel {
+function resolveAutoModel(device: Device, mobile: boolean, f16 = false): WhisperModel {
   // Телефон: base. small упирается в память WebView (32-битный WASM, пики
   // 0.5–0.8 ГБ — OOM-киллер убивает всё приложение без перехватываемой ошибки)
   // и в один поток (нет crossOriginIsolated) — 5–10× медленнее реального времени.
   if (mobile) return "base";
   // Десктоп: turbo на видеокарте, иначе small — потолок 32-битного WASM.
-  return device === "webgpu" ? "turbo" : "small";
+  // With shader-f16, Turbo HQ: its fp16 encoder measured ~35% faster than q4.
+  if (device !== "webgpu") return "small";
+  return f16 ? "turbo-hq" : "turbo";
 }
 
 function dtypeFor(model: WhisperModel, device: Device, f16: boolean): Dtype {
@@ -326,7 +328,7 @@ export interface DownloadPlan {
 export async function planDownload(pref: ModelPref, devicePref: DevicePref, onProgress: ProgressFn): Promise<DownloadPlan> {
   if (!probed) onProgress({ stage: "device" });
   const { device, f16 } = await probeDeviceCached(devicePref);
-  const model: WhisperModel = pref === "auto" ? resolveAutoModel(device, !!host?.mobile) : pref;
+  const model: WhisperModel = pref === "auto" ? resolveAutoModel(device, !!host?.mobile, f16) : pref;
   if (isTurbo(model) && device === "wasm") throw new Error("MODEL_TOO_BIG_FOR_CPU");
   const d = dtypeFor(model, device, f16);
   const enc = typeof d === "string" ? d : d.encoder_model;
@@ -363,7 +365,7 @@ async function getPipelineInner(pref: ModelPref, devicePref: DevicePref, onProgr
   // Модель и turbo решаются по РЕАЛЬНОМУ устройству, а не по платформе: если у
   // телефона вдруг есть WebGPU — пусть работает; если нет — честная ошибка ДО загрузки.
   const { device, f16 } = await probeDeviceCached(devicePref);
-  let model: WhisperModel = pref === "auto" ? resolveAutoModel(device, !!host?.mobile) : pref;
+  let model: WhisperModel = pref === "auto" ? resolveAutoModel(device, !!host?.mobile, f16) : pref;
   let modelId = MODEL_IDS[model];
   if (loaded?.key === keyOf(model, device, f16)) return loaded; // уже готов — молча
 
