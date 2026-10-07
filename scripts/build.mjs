@@ -25,7 +25,7 @@ if(process.argv.includes('--smoke')) {
 const iconNames = {
   mic: 'microphone', history: 'history', settings: 'adjustments-horizontal',
   file: 'file-music', copy: 'copy', arrow: 'arrow-right', search: 'search',
-  shield: 'shield-check', download: 'download', stop: 'player-stop',
+  shield: 'shield-check', download: 'download', stop: 'player-stop', play: 'player-play',
   keyboard: 'keyboard', 'chevron-down': 'chevron-down', tray: 'arrow-down-right',
 };
 const symbols = await Promise.all(Object.entries(iconNames).map(async ([id, name]) => {

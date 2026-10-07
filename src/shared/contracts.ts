@@ -20,7 +20,8 @@ export const DEFAULT_SETTINGS: Settings = {
   sounds: true, warmup: false, startAtLogin: false, diarization: true,
   historyLimit: 100, hotkey: 'ctrl-space', restoreClipboard: false,
 };
-export interface HistoryItem extends TranscriptDetails { id: string; text: string; createdAt: string; source: 'dictation' | 'file'; pinned?: boolean; }
+/** audioPath: the source file of a file transcript, for playing cues; set by the main process only. */
+export interface HistoryItem extends TranscriptDetails { id: string; text: string; createdAt: string; source: 'dictation' | 'file'; pinned?: boolean; audioPath?: string; }
 export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'error';
 export interface Status { phase: Phase; message: string; seconds?: number; level?: number; progress?: number; remainingSeconds?: number; }
 export type Command =

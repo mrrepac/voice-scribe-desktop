@@ -34,6 +34,9 @@ export class AudioImport {
     return { id, name: path.basename(source) };
   }
 
+  /** The original file of an import, for playing transcript cues later. */
+  sourceOf(id: string): string { return this.get(id).source; }
+
   async prepare(id: string): Promise<{ samples: number; duration: number }> {
     const entry = this.get(id);
     if (entry.preparing) throw new Error('Аудиофайл уже обрабатывается');

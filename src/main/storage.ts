@@ -6,6 +6,8 @@ import { normalizeSegments } from '../shared/transcript';
 import { upsertReplacement, type RememberedCorrection } from '../shared/corrections';
 import { isHotkey } from '../shared/hotkeys';
 
+const audioPathOf = (value: unknown) => typeof value === 'string' && value.length <= 1000 && path.isAbsolute(value) ? { audioPath: value } : {};
+
 function transcriptDetails(value: unknown): Pick<HistoryItem, 'segments'|'name'> {
   if (!value || typeof value !== 'object') return {};
   const raw=value as Record<string,unknown>;
@@ -53,10 +55,11 @@ export class Storage {
   }
   async history(): Promise<HistoryItem[]> {
     const data=await this.read('history.json',[]);
-    return Array.isArray(data) ? data.filter((x):x is HistoryItem=> !!x && typeof x.text==='string' && typeof x.id==='string' && typeof x.createdAt==='string').map(x=>({id:x.id,text:x.text,createdAt:x.createdAt,source:x.source==='file'?'file':'dictation',...(x.pinned===true?{pinned:true}:{}),...(x.source==='file'?transcriptDetails(x):{})})) : [];
+    return Array.isArray(data) ? data.filter((x):x is HistoryItem=> !!x && typeof x.text==='string' && typeof x.id==='string' && typeof x.createdAt==='string').map(x=>({id:x.id,text:x.text,createdAt:x.createdAt,source:x.source==='file'?'file':'dictation',...(x.pinned===true?{pinned:true}:{}),...(x.source==='file'?{...transcriptDetails(x),...audioPathOf(x.audioPath)}:{})})) : [];
   }
-  async addHistory(text: string, source: 'dictation'|'file', details?: unknown): Promise<HistoryItem> {
-    const item: HistoryItem={id:randomUUID(),text,source,createdAt:new Date().toISOString(),...(source==='file'?transcriptDetails(details):{})};
+  /** audioPath comes from the main process (an import's source), never from renderer details. */
+  async addHistory(text: string, source: 'dictation'|'file', details?: unknown, audioPath?: string): Promise<HistoryItem> {
+    const item: HistoryItem={id:randomUUID(),text,source,createdAt:new Date().toISOString(),...(source==='file'?{...transcriptDetails(details),...audioPathOf(audioPath)}:{})};
     await this.serial(async()=> {
       const old=await this.history();const {historyLimit}=await this.settings();
       let ordinary=0;
@@ -85,7 +88,7 @@ export class Storage {
       const index=items.findIndex(item=>item.id===id);
       if(index<0)throw new Error('Запись больше не найдена в истории');
       const old=items[index];
-      updated={id:old.id,createdAt:old.createdAt,source:old.source,text,...(old.pinned?{pinned:true}:{}),...(old.source==='file'?transcriptDetails(details):{})};
+      updated={id:old.id,createdAt:old.createdAt,source:old.source,text,...(old.pinned?{pinned:true}:{}),...(old.source==='file'?{...transcriptDetails(details),...audioPathOf(old.audioPath)}:{})};
       items[index]=updated;
       await this.atomic('history.json',items);
     });

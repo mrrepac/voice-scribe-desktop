@@ -252,3 +252,7 @@ fieldset:disabled .switch { opacity: .42; }
 .model-file-name { flex: 1; min-width: 0; font-size: 12px; }
 .model-file-size { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .model-file-note { color: var(--muted); font-size: 11px; }
+.segment-head { display: flex; align-items: center; gap: 2px; }
+.segment-play { width: 26px; min-height: 26px; padding: 4px; }
+.segment-play[aria-pressed="true"] { background: var(--hover); }
+.transcript-segment.playing .segment-time { color: var(--text); }

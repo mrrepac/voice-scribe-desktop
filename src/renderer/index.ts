@@ -150,6 +150,9 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let saving: Promise<void> = Promise.resolve();
 let pendingCommands: Command[] = [];
 let cueContext: AudioContext | null = null;
+/** Plays one cue of a file transcript from its source file (scribe://app/media/<history id>). */
+const player = new Audio();
+let playingCue: { index: number; end: number } | null = null;
 let lastSeconds = 0;
 const workProgress = new WorkProgress();
 let workStarted = 0;
@@ -410,7 +413,9 @@ function renderTranscript(): void {
   $('transcript-name').hidden = !editor.name;
   $('transcript-name').textContent = editor.name ?? '';
   $('transcript-count').textContent = `${editor.segments.length} фрагм.`;
+  stopPlayback();
   $('transcript-segments').replaceChildren();
+  const playable = Boolean(currentHistoryId && history.find(item => item.id === currentHistoryId)?.audioPath);
   const fragment = document.createDocumentFragment();
   for (const [index, segment] of editor.segments.entries()) {
     const row = document.createElement('li');
@@ -436,7 +441,21 @@ function renderTranscript(): void {
     input.addEventListener('change', flushHistorySave);
     const meta = document.createElement('div');
     meta.className = 'segment-meta';
-    meta.append(time);
+    if (playable) {
+      const head = document.createElement('div');
+      head.className = 'segment-head';
+      const play = document.createElement('button');
+      play.type = 'button';
+      play.className = 'icon-button segment-play';
+      play.dataset.cue = String(index);
+      play.setAttribute('aria-pressed', 'false');
+      play.setAttribute('aria-label', `Прослушать фрагмент ${index + 1}`);
+      play.title = 'Прослушать фрагмент';
+      play.innerHTML = '<svg aria-hidden="true"><use href="#i-play"/></svg>';
+      play.addEventListener('click', () => toggleCue(index));
+      head.append(play, time);
+      meta.append(head);
+    } else meta.append(time);
     if (editor.segments.some(cue => cue.speaker)) {
       const speaker = document.createElement('input');
       speaker.className = 'segment-speaker';
@@ -465,6 +484,47 @@ function renderTranscript(): void {
   resultText.readOnly = isBusy() || timed;
   setTranscriptView(editor.view);
 }
+
+function markPlaying(index: number | null): void {
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.segment-play')) {
+    const active = Number(button.dataset.cue) === index;
+    button.setAttribute('aria-pressed', String(active));
+    button.title = active ? 'Остановить' : 'Прослушать фрагмент';
+    button.querySelector('use')?.setAttribute('href', active ? '#i-stop' : '#i-play');
+    button.closest('.transcript-segment')?.classList.toggle('playing', active);
+  }
+}
+
+function stopPlayback(): void {
+  if (!playingCue) return;
+  playingCue = null;
+  player.pause();
+  markPlaying(null);
+}
+
+function toggleCue(index: number): void {
+  if (playingCue?.index === index) { stopPlayback(); return; }
+  const cue = editor.segments[index];
+  if (!cue || !currentHistoryId || phase === 'recording' || phase === 'starting') return;
+  const source = new URL(`./media/${encodeURIComponent(currentHistoryId)}`, window.location.href).href;
+  if (player.src !== source) player.src = source;
+  playingCue = { index, end: cue.end };
+  markPlaying(index);
+  player.currentTime = cue.start;
+  void player.play().catch(error => {
+    if (error instanceof DOMException && error.name === 'AbortError') return;
+    stopPlayback();
+    toast('Не удалось проиграть фрагмент: исходный файл перемещён, удалён или его формат не поддерживается.', true);
+  });
+}
+
+player.addEventListener('timeupdate', () => { if (playingCue && player.currentTime >= playingCue.end) stopPlayback(); });
+player.addEventListener('ended', stopPlayback);
+player.addEventListener('error', () => {
+  if (!playingCue) return;
+  stopPlayback();
+  toast('Не удалось проиграть фрагмент: исходный файл перемещён, удалён или его формат не поддерживается.', true);
+});
 
 function showResult(text: string, label: string, note: string, completed: boolean, details: TranscriptDetails & { historyId?: string; view?: TranscriptView } = {}): void {
   showProofreadReview([]);
@@ -647,6 +707,8 @@ async function start(target: string | null): Promise<void> {
   };
   session = active;
   lastAudio = null;
+  // The speakers must not play into the microphone.
+  stopPlayback();
   lastSeconds = 0;
   $('timer').textContent = '00:00';
   setPhase('starting');
@@ -881,7 +943,7 @@ async function pickFile(dropped?: File): Promise<void> {
     }
     if (!valid(token)) return;
     const text = transcript.segments.length ? transcriptText(segments) : processText(transcript.text, options);
-    await complete(text, 'file', token, null, false, { segments, name: file.name });
+    await complete(text, 'file', token, null, false, { segments, name: file.name, audioId });
     if (valid(token) && speakerNote) $('result-note').textContent += ' ' + speakerNote;
   } catch (error) { fail(error, token); }
   finally { if (audioId) await api.releaseAudio(audioId).catch(() => {}); }

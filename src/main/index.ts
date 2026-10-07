@@ -6,6 +6,7 @@ import { Storage } from './storage';
 import { DiarizationService } from './diarization';
 import { GigaamService } from './gigaam';
 import { ModelStore } from './models';
+import { mediaResponse } from './media';
 import { NativeBridge } from './native';
 import type { Command, Status } from '../shared/contracts';
 import { formatSubtitles, normalizeSegments, subtitleFilename } from '../shared/transcript';
@@ -25,6 +26,7 @@ import { historySmokeTest } from './history-smoke';
 import { clipboardSmokeTest } from './clipboard-smoke';
 import { gigaamSmokeTest } from './gigaam-smoke';
 import { dictationSmokeTest } from './dictation-smoke';
+import { playbackSmokeTest } from './playback-smoke';
 import { HOTKEYS, type Hotkey } from '../shared/hotkeys';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -134,6 +136,11 @@ async function appResponse(request:Request):Promise<Response> {
   let relative:string;
   try{relative=decodeURIComponent(url.pathname).replace(/^\/+/, '');}catch{return new Response('Bad path',{status:400});}
   if(relative.startsWith('model-cache/'))return modelCacheResponse(relative.slice('model-cache/'.length));
+  // Source files of file transcripts, by history id: the renderer never names a path.
+  if(relative.startsWith('media/')){
+    const item=(await storage.history()).find(entry=>entry.id===relative.slice('media/'.length));
+    return item?.audioPath ? mediaResponse(item.audioPath,request.headers.get('range')) : new Response('Not found',{status:404});
+  }
   const base=path.join(root,'dist'); const file=path.resolve(base,relative);
   if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
   return net.fetch(pathToFileURL(file).href);
@@ -191,7 +198,11 @@ function setupIpc():void {
   });
   handle('correction:remember',(from,to)=>storage.rememberCorrection(textArg(from),textArg(to)));
   handle('history:get',()=>storage.history());
-  handle('history:add',(text,source,details)=>storage.addHistory(textArg(text),source==='file'?'file':'dictation',details));
+  handle('history:add',(text,source,details)=>{
+    let audioPath:string|undefined;
+    try{if(source==='file' && typeof details?.audioId==='string')audioPath=audioImport.sourceOf(details.audioId);}catch{/* The import was released: no playback. */}
+    return storage.addHistory(textArg(text),source==='file'?'file':'dictation',details,audioPath);
+  });
   handle('history:update',(id,text,details)=>storage.updateHistory(textArg(id),textArg(text),details));
   handle('history:clear',keepPinned=>storage.clearHistory(keepPinned===true));
   handle('history:pin',(id,pinned)=>{if(typeof pinned!=='boolean')throw new Error('Некорректное закрепление');return storage.pinHistory(textArg(id),pinned);});
@@ -502,6 +513,7 @@ async function smokeTest():Promise<void> {
     if(process.argv.includes('--history-test'))await historySmokeTest(win);
     const giga=process.argv.includes('--gigaam-test')?await gigaamSmokeTest(win):undefined;
     if(giga)console.log('GIGAAM_SMOKE',JSON.stringify(giga));
+    if(process.argv.includes('--playback-test'))console.log('PLAYBACK_SMOKE',JSON.stringify(await playbackSmokeTest(win)));
     if(process.argv.includes('--dictation-test'))console.log('DICTATION_SMOKE',JSON.stringify(await dictationSmokeTest(win)));
     if(!bridge.ready)await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Native helper startup timeout')),10000);bridge.once('ready',()=>{clearTimeout(timer);resolve();});bridge.once('failure',message=>{clearTimeout(timer);reject(new Error(message));});});
     if(process.argv.includes('--clipboard-test'))await clipboardSmokeTest(win,bridge);

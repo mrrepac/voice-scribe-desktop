@@ -3,7 +3,8 @@ export interface TranscriptSegment { start: number; end: number; text: string; s
 /** language: the code Whisper detected when none was given (absent for a fixed or mixed pair). */
 export interface Transcript { text: string; segments: TranscriptSegment[]; language?: string; }
 export type SubtitleFormat = 'srt' | 'vtt';
-export interface TranscriptDetails { segments?: TranscriptSegment[]; name?: string; }
+/** audioId: the import a file transcript came from; main resolves it to the source path, never the renderer. */
+export interface TranscriptDetails { segments?: TranscriptSegment[]; name?: string; audioId?: string; }
 
 /** Accept legacy/untrusted storage and IPC data without keeping malformed cues. */
 export function normalizeSegments(raw: unknown): TranscriptSegment[] {
