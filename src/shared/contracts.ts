@@ -1,6 +1,7 @@
 import type { TranscriptDetails, TranscriptSegment, SubtitleFormat } from './transcript';
 import type { SpeakerTurn, SpeakerProgress } from './speakers';
 import type { RememberedCorrection } from './corrections';
+import type { Hotkey } from './hotkeys';
 export type Model = 'auto' | 'tiny' | 'base' | 'small' | 'turbo';
 export type Device = 'auto' | 'wasm' | 'webgpu';
 export interface Settings {
@@ -9,14 +10,14 @@ export interface Settings {
   microphone: string; voiceCommands: boolean; replacements: string;
   silenceSeconds: number; live: boolean; sounds: boolean; warmup: boolean;
   startAtLogin: boolean; diarization: boolean;
-  historyLimit: number;
+  historyLimit: number; hotkey: Hotkey;
 }
 export const DEFAULT_SETTINGS: Settings = {
   llmEnabled: false, llmBaseUrl: 'https://api.openai.com/v1', llmModel: '',
   model: 'auto', device: 'auto', language: 'ru', language2: '', microphone: '',
   voiceCommands: false, replacements: '', silenceSeconds: 0, live: false,
   sounds: true, warmup: false, startAtLogin: false, diarization: true,
-  historyLimit: 100,
+  historyLimit: 100, hotkey: 'ctrl-space',
 };
 export interface HistoryItem extends TranscriptDetails { id: string; text: string; createdAt: string; source: 'dictation' | 'file'; pinned?: boolean; }
 export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'error';
@@ -24,6 +25,7 @@ export interface Status { phase: Phase; message: string; seconds?: number; level
 export type Command =
   | { action: 'dictation-down'; target: string }
   | { action: 'dictation-up'; heldMs: number }
+  | { action: 'dictation-abort' }
   | { action: 'toggle'; target?: string }
   | { action: 'cancel' | 'finish-enter' | 'show-history' }
   | { action: 'proofread'; mode?: import('./proofread').ProofreadMode }
@@ -68,7 +70,6 @@ export interface ScribeAPI {
   status(value: Status): void;
   hide(): void;
   onCommand(handler: (command: Command) => void): () => void;
-  cacheGet(key: string): Promise<ArrayBuffer | null>;
   cacheHas(key: string): Promise<boolean>;
   cachePut(key: string, data: ArrayBuffer): Promise<void>;
   getAppInfo(): Promise<{version: string; dataPath: string; nativeReady: boolean}>;

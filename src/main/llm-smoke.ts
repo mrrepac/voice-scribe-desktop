@@ -14,7 +14,7 @@ export async function llmSmokeTest(win: BrowserWindow): Promise<void> {
     const data = await readFile(file).catch(error => { if(error.code === 'ENOENT') return null; throw error; });
     return {file,data};
   }));
-  let mode: 'ok' | 'error' | 'slow' = 'ok';
+  let mode: 'ok' | 'error' | 'slow' | 'partial' = 'ok';
   let requests = 0;
   const server = createServer(async (req,res) => {
     let body = '';
@@ -32,7 +32,9 @@ export async function llmSmokeTest(win: BrowserWindow): Promise<void> {
     const code = mode === 'error' ? 401 : 200;
     const corrected=input.replace('превет','Привет')+'!';
     const batch=JSON.parse(body).messages[0].content.includes('корректор субтитров') ? JSON.parse(input) : null;
-    const content=batch ? JSON.stringify({cues:batch.cues.map((cue:any)=>({id:cue.id,text:cue.text.replace('превет','Привет')+'!',issues:[]}))}) : JSON.stringify({text:corrected,issues:corrected.includes('мир')?[{quote:'мир',reason:'Нужен контекст: <b>обращение или название?</b>'}]:[]});
+    // 'partial': the second group of a long transcript always drops a cue.
+    const cues=batch && mode==='partial' && batch.cues[0].id>=24 ? batch.cues.slice(1) : batch?.cues;
+    const content=batch ? JSON.stringify({cues:cues.map((cue:any)=>({id:cue.id,text:cue.text.replace('превет','Привет')+'!',issues:[]}))}) : JSON.stringify({text:corrected,issues:corrected.includes('мир')?[{quote:'мир',reason:'Нужен контекст: <b>обращение или название?</b>'}]:[]});
     const send = () => { res.writeHead(code, {'Content-Type':'application/json'}); res.end(JSON.stringify({choices:[{finish_reason:'stop',message:{content}}]})); };
     if (mode === 'slow') setTimeout(send, 1200); else send();
   });
@@ -104,6 +106,22 @@ export async function llmSmokeTest(win: BrowserWindow): Promise<void> {
     await until(`document.querySelector('#transcript-save').textContent==='Правки сохранены'`);
     const saved = (await execute(`window.scribe.getHistory()`)).find((item:any)=>item.id===timed.id);
     assert.deepEqual(saved.segments,[{start:1,end:2,text:'Привет!',speaker:'Анна'},{start:3,end:4,text:'мир!',speaker:'Борис'}]);
+    mode = 'partial';
+    const long = await execute(`window.scribe.addHistory('long','file',{segments:Array.from({length:30},(_,i)=>({start:i*2,end:i*2+1,text:'превет '+i}))})`);
+    await execute(`window.scribe.getHistory()`);
+    await win.loadURL('scribe://app/index.html');
+    await until(`!document.querySelector('#record-button').disabled`);
+    await open(long.id);
+    const beforePartial = requests;
+    await execute(`document.querySelector('#proofread-result').click()`);
+    await until(`document.querySelector('#result-note').textContent.includes('частично')`);
+    await idle();
+    assert.equal(requests-beforePartial,3,'failed group is retried once');
+    const cues = await execute(`[...document.querySelectorAll('#transcript-segments .segment-text')].map(input=>input.value)`);
+    assert.deepEqual(cues.slice(0,24),Array.from({length:24},(_,i)=>'Привет '+i+'!'),'completed group is kept');
+    assert.deepEqual(cues.slice(24),Array.from({length:6},(_,i)=>'превет '+(i+24)),'failed group is unchanged');
+    assert.match(await execute(`document.querySelector('#result-note').textContent`),/25–30/);
+    mode = 'ok';
     const out = path.resolve('artifacts','llm');
     await mkdir(out,{recursive:true});
     await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
@@ -125,7 +143,7 @@ export async function llmSmokeTest(win: BrowserWindow): Promise<void> {
     await execute(`const p=document.querySelector('#llm-provider');p.value='chadgpt';p.dispatchEvent(new Event('change',{bubbles:true}))`);
     await until(`document.querySelector('#llm-key-status').textContent.includes('не сохранён')`);
     assert.equal(await execute(`document.querySelector('[name="llmBaseUrl"]').value`),'https://ask.chadgpt.ru/api/v1');
-    await writeFile(path.join(out,'result.json'),JSON.stringify({ok:true,requests,checks:['encrypted key','provider key isolation','provider preset selection','model catalogue UI','connection test UI','hotkey proofreading','actual text diff','uncertainty highlighting','select issue in editor','stale report after edits','model markup is not HTML','undo','HTTP failure preserves text','cancel discards late response','timestamps and speakers preserved','delete key']},null,2));
+    await writeFile(path.join(out,'result.json'),JSON.stringify({ok:true,requests,checks:['encrypted key','provider key isolation','provider preset selection','model catalogue UI','connection test UI','hotkey proofreading','actual text diff','uncertainty highlighting','select issue in editor','stale report after edits','model markup is not HTML','undo','HTTP failure preserves text','cancel discards late response','timestamps and speakers preserved','partial batch failure keeps completed groups','delete key']},null,2));
   } finally {
     server.closeAllConnections();
     server.close();

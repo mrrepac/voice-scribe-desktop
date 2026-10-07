@@ -20,6 +20,7 @@ import { UpdateService } from './updates';
 import { AudioImport } from './audio-import';
 import { NativeRecovery } from './native-recovery';
 import { historySmokeTest } from './history-smoke';
+import { HOTKEYS, type Hotkey } from '../shared/hotkeys';
 
 const smoke = process.argv.includes('--smoke-test');
 const root = app.getAppPath();
@@ -34,6 +35,7 @@ let quitting=false;
 let deliveryQueue:Promise<unknown>=Promise.resolve();
 let deliveryGeneration=0;
 let lastStatus:Status={phase:'idle',message:'Готов к диктовке'};
+let hotkey:Hotkey='ctrl-space';
 const bridge=new NativeBridge();
 const nativeRecovery=new NativeRecovery(bridge,app.isPackaged?path.join(process.resourcesPath,'native/VoiceScribe.Native.exe'):path.join(root,'native/bin/VoiceScribe.Native.exe'),state=>{
   if(win && !win.isDestroyed())win.webContents.send('native:health',state);
@@ -48,6 +50,8 @@ const audioImport = new AudioImport(app.isPackaged ? path.join(process.resources
 const trusted=(url:string)=>{try { const u=new URL(url); return u.protocol==='scribe:' && u.host==='app'; } catch { return false; }};
 const send=(command:Command)=>{if(win && !win.isDestroyed())win.webContents.send('command',command);};
 const textArg=(v:unknown)=>{if(typeof v!=='string' || v.length>2_000_000) throw new Error('Некорректный текст');return v;};
+// The model returns the whole text, so allow ~10 ms per input character (50 000 chars ≈ 9 min).
+const proofreadTimeout=(chars:number)=>Math.min(600_000,60_000+chars*10);
 const active=()=>['starting','recording','transcribing','preparing'].includes(lastStatus.phase);
 const installed = app.isPackaged && !smoke && !process.env.PORTABLE_EXECUTABLE_FILE && existsSync(path.join(process.resourcesPath,'installed.txt'));
 const updates = new UpdateService(autoUpdater, installed, active, state => {
@@ -61,14 +65,20 @@ function ownWindowId():string {
 function configureNativeWindow():void {
   if(win && !win.isDestroyed() && bridge.ready)void bridge.request('set-scribe-window',{target:ownWindowId()}).catch(()=>{});
 }
+function applyHotkey(value:Hotkey):void {
+  hotkey=value;
+  if(bridge.ready)void bridge.request('set-hotkey',{hotkey}).catch(error=>console.error('Hotkey change failed',error));
+  if(lastStatus.phase==='idle')tray?.setToolTip(`Voice Scribe · ${HOTKEYS[hotkey].label}`);
+  if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:HOTKEYS[hotkey].label});
+}
 function makeTray():void {
   const icon=nativeImage.createFromPath(path.join(root,'dist/icon.png')).resize({width:24,height:24});
-  tray=new Tray(icon); tray.setToolTip('Voice Scribe · Ctrl+Space'); tray.on('double-click',show); refreshTray();
+  tray=new Tray(icon); tray.setToolTip(`Voice Scribe · ${HOTKEYS[hotkey].label}`); tray.on('double-click',show); refreshTray();
 }
 function refreshTray():void {
   tray?.setContextMenu(Menu.buildFromTemplate([
     {label:'Открыть Voice Scribe',click:show},
-    {label:active() ? 'Остановить диктовку' : 'Записать в буфер',enabled:lastStatus.phase!=='preparing',click:()=>send({action:'toggle'})},
+    {label:['starting','recording'].includes(lastStatus.phase) ? 'Остановить диктовку' : 'Записать в буфер',enabled:lastStatus.phase!=='transcribing',click:()=>send({action:'toggle'})},
     {label:'Отменить',enabled:active(),click:()=>send({action:'cancel'})},
     {type:'separator'},
     {label:'История',click:()=>{show();send({action:'show-history'});}},
@@ -80,6 +90,13 @@ function handle(name:string,fn:(...args:any[])=>unknown):void {
     if(event.sender!==win.webContents || !trusted(event.senderFrame?.url||'')) throw new Error('Untrusted IPC');
     return fn(...args);
   });
+}
+async function modelCacheResponse(key:string):Promise<Response> {
+  let cached:{file:string;size:number}|null;
+  try{cached=await storage.cacheFile(key);}catch{return new Response('Bad key',{status:400});}
+  if(!cached)return new Response('Not cached',{status:404});
+  const response=await net.fetch(pathToFileURL(cached.file).href);
+  return new Response(response.body,{headers:{'content-type':'application/octet-stream','content-length':String(cached.size)}});
 }
 function setupIpc():void {
   handle('updates:state',()=>updates.state);
@@ -99,7 +116,8 @@ function setupIpc():void {
   handle('llm:batch',async batch=>{
     if(proofreadController)throw new Error('Вычитка уже выполняется.');
     const controller=new AbortController();proofreadController=controller;
-    const timer=setTimeout(()=>controller.abort(),60000);
+    const chars=Array.isArray(batch?.cues)?batch.cues.reduce((sum:number,cue:{text?:unknown})=>sum+(typeof cue?.text==='string'?cue.text.length:0),0):0;
+    const timer=setTimeout(()=>controller.abort(),proofreadTimeout(chars));
     try {const settings=await storage.settings();return await proofreadBatch(batch,settings,await apiKeys.get(settings.llmBaseUrl),controller.signal);}
     finally {clearTimeout(timer);if(proofreadController===controller)proofreadController=null;}
   });
@@ -108,7 +126,7 @@ function setupIpc():void {
     if(proofreadController)throw new Error('Вычитка уже выполняется.');
     const controller=new AbortController();
     proofreadController=controller;
-    const timer=setTimeout(()=>controller.abort(),60000);
+    const timer=setTimeout(()=>controller.abort(),proofreadTimeout(typeof value==='string'?value.length:0));
     try { const settings=await storage.settings(); return await proofread(textArg(value),settings,await apiKeys.get(settings.llmBaseUrl),controller.signal,undefined,mode); }
     finally { clearTimeout(timer); if(proofreadController===controller)proofreadController=null; }
   });
@@ -116,6 +134,7 @@ function setupIpc():void {
   handle('settings:save',async value=>{
     await apiKeys.migrate((await storage.settings()).llmBaseUrl);
     const saved=await storage.saveSettings(value);
+    if(saved.hotkey!==hotkey)applyHotkey(saved.hotkey);
     if(app.isPackaged && !smoke) app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,args:['--hidden']});
     return saved;
   });
@@ -183,7 +202,6 @@ function setupIpc():void {
     if(result.canceled || !result.filePaths[0]) return null;
     return audioImport.select(result.filePaths[0]);
   });
-  handle('cache:get',key=>storage.cacheGet(textArg(key)));
   handle('cache:has',key=>storage.cacheHas(textArg(key)));
   handle('cache:put',(key,data)=>{if(!(data instanceof ArrayBuffer) || data.byteLength>1_000_000_000) throw new Error('Invalid cache data');return storage.cachePut(textArg(key),data);});
   handle('app:info',()=>({version:app.getVersion(),dataPath:storage.root,nativeReady:bridge.ready}));
@@ -205,7 +223,7 @@ function setupIpc():void {
       overlay.setPosition(Math.round(area.x+(area.width-430)/2),area.y+area.height-112);
       overlay.showInactive();
     }else overlay?.hide();
-    if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',lastStatus);
+    if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:HOTKEYS[hotkey].label});
   });
 }
 async function createWindows():Promise<void> {
@@ -431,6 +449,7 @@ else {
       if(url.host!=='app')return new Response('Not found',{status:404});
       let relative:string;
       try{relative=decodeURIComponent(url.pathname).replace(/^\/+/, '');}catch{return new Response('Bad path',{status:400});}
+      if(relative.startsWith('model-cache/'))return modelCacheResponse(relative.slice('model-cache/'.length));
       const base=path.join(root,'dist'); const file=path.resolve(base,relative);
       if(!file.startsWith(base+path.sep))return new Response('Forbidden',{status:403});
       return net.fetch(pathToFileURL(file).href);
@@ -445,7 +464,9 @@ else {
       if(event.action==='dictation-down' && own)event={...event,target:''};
       send(event as Command);
     });
-    bridge.on('ready',()=>{configureNativeWindow();void bridge.request('set-active',{active:active()}).catch(()=>{});});
+    // A restarted helper starts with the default shortcut; reapply the saved one.
+    bridge.on('ready',()=>{configureNativeWindow();applyHotkey(hotkey);void bridge.request('set-active',{active:active()}).catch(()=>{});});
+    hotkey=(await storage.settings().catch(()=>null))?.hotkey ?? hotkey;
     nativeRecovery.restart();
     await createWindows(); configureNativeWindow(); makeTray();
     if(installed){

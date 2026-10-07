@@ -13,7 +13,7 @@ export async function proofreadBatch(raw: unknown, settings: Settings, key: stri
       {role:'user',content:JSON.stringify(batch)},
     ]})});
   } catch {
-    throw new Error(signal.aborted ? 'Вычитка отменена или превышено время ожидания (60 секунд).' : 'Не удалось подключиться к API. Проверьте адрес сервера и соединение.');
+    throw new Error(signal.aborted ? 'Вычитка отменена или модель не ответила за отведённое время.' : 'Не удалось подключиться к API. Проверьте адрес сервера и соединение.');
   }
   if(!response.ok)throw apiError(response.status,settings.llmBaseUrl);
   const data=await response.json().catch(()=>{throw new Error('API вернул некорректный ответ. Исходный текст сохранён.');});
@@ -67,7 +67,7 @@ export async function proofread(text: string, settings: Settings, key: string, s
       ] }),
     });
   } catch {
-    if (signal.aborted) throw new Error('Вычитка отменена или превышено время ожидания (60 секунд).');
+    if (signal.aborted) throw new Error('Вычитка отменена или модель не ответила за отведённое время.');
     throw new Error('Не удалось подключиться к API. Проверьте адрес сервера и соединение.');
   }
   if (!response.ok) {

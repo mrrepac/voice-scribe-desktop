@@ -12,14 +12,14 @@ declare const self: {
 
 let cacheSequence = 0;
 const cacheRequests = new Map<number, {
-  resolve(buffer: ArrayBuffer | null): void;
+  resolve(): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
 }>();
 let activeId = 0;
 let current: Loaded | null = null;
 
-function requestCache(key: string, buf?: ArrayBuffer): Promise<ArrayBuffer | null> {
+function storeInCache(key: string, buf: ArrayBuffer): Promise<void> {
   const id = ++cacheSequence;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -27,8 +27,7 @@ function requestCache(key: string, buf?: ArrayBuffer): Promise<ArrayBuffer | nul
       reject(new Error("MODEL_CACHE_TIMEOUT"));
     }, 120_000);
     cacheRequests.set(id, { resolve, reject, timer });
-    if (buf) self.postMessage({ t: "cache-put", id, key, buf }, [buf]);
-    else self.postMessage({ t: "cache-get", id, key });
+    self.postMessage({ t: "cache-put", id, key, buf }, [buf]);
   });
 }
 
@@ -39,18 +38,20 @@ const diskCache: CacheLike = {
     // Transformers probes /models/... before its remote URL even when local
     // models are disabled. That lookup cannot exist in our URL-keyed cache.
     if (!key?.startsWith("https://huggingface.co/")) return undefined;
-    const buf = await requestCache(key);
-    if (!buf) {
+    // The app protocol streams the file from disk; a 404 means it is not downloaded yet.
+    const response = await fetch(new URL(`./model-cache/${encodeURIComponent(key)}`, self.location.href));
+    if (response.status === 404) {
       noteCacheMiss(key);
       return undefined;
     }
-    return new Response(buf, { headers: { "content-length": String(buf.byteLength) } });
+    if (!response.ok) throw new Error(`MODEL_CACHE_READ_FAILED ${response.status}`);
+    return response;
   },
   async put(request, response) {
     const key = keyOf(request);
     if (!key) return;
     try {
-      await requestCache(key, await response.arrayBuffer());
+      await storeInCache(key, await response.arrayBuffer());
     } catch (error) {
       // Recognition may continue, but never imply that the next start is offline.
       self.postMessage({ t: "progress", id: activeId, p: { stage: "model", note: "cache-write-failed" } });
@@ -105,7 +106,7 @@ self.onmessage = ({ data: msg }) => {
     cacheRequests.delete(msg.id);
     clearTimeout(request.timer);
     if (msg.error) request.reject(new Error(msg.error));
-    else request.resolve(msg.buf);
+    else request.resolve();
     return;
   }
   queue = queue.then(() => handle(msg)).catch((error: unknown) => {

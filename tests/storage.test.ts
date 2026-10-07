@@ -58,6 +58,8 @@ test('pinned transcripts survive retention, edits, restart and selective clearin
 test('settings reject unsafe values and bound memory usage',()=>{
   const settings=validateSettings({model:'other',device:'unknown',silenceSeconds:-2,startAtLogin:'true',replacements:'a'.repeat(60000)});
   assert.equal(settings.model,'auto');assert.equal(settings.device,'auto');assert.equal(settings.silenceSeconds,2);assert.equal(settings.startAtLogin,false);assert.equal(settings.replacements.length,50000);
+  assert.equal(validateSettings({hotkey:'toString'}).hotkey,'ctrl-space');
+  assert.equal(validateSettings({hotkey:'win-alt'}).hotkey,'win-alt');
 });
 test('model keys only access allowed Whisper repositories',()=>{
   assert.equal(cacheFilename('https://huggingface.co/onnx-community/whisper-tiny/resolve/main/config.json'),'huggingface.co_onnx-community_whisper-tiny_resolve_main_config.json');
@@ -72,9 +74,9 @@ test('concurrent history commits do not lose transcripts; legacy cache is read o
     assert.equal((await store.history()).length,20);
     const key='https://huggingface.co/onnx-community/whisper-tiny/resolve/main/config.json';
     await writeFile(path.join(legacy,cacheFilename(key)),'old');
-    assert.equal((await store.cacheGet(key))?.toString(),'old');
+    assert.equal(await readFile((await store.cacheFile(key))!.file,'utf8'),'old');
     await store.cachePut(key,new TextEncoder().encode('new').buffer);
-    assert.equal((await store.cacheGet(key))?.toString(),'new');
+    assert.equal(await readFile((await store.cacheFile(key))!.file,'utf8'),'new');
     assert.equal(await readFile(path.join(legacy,cacheFilename(key)),'utf8'),'old');
     await store.clearHistory();assert.deepEqual(await store.history(),[]);
   } finally {await rm(base,{recursive:true,force:true});}

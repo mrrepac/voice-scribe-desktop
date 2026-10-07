@@ -38,7 +38,6 @@ const api: ScribeAPI = {
   status:value=>ipcRenderer.send('status',value),
   hide:()=>ipcRenderer.send('hide'),
   onCommand:handler=>{const fn=(_:unknown,cmd:Command)=>handler(cmd);ipcRenderer.on('command',fn);return()=>ipcRenderer.removeListener('command',fn);},
-  cacheGet:async key=>{const data=await ipcRenderer.invoke('cache:get',key);return data ? new Uint8Array(data).buffer : null;},
   cacheHas:key=>ipcRenderer.invoke('cache:has',key),
   cachePut:(key,data)=>ipcRenderer.invoke('cache:put',key,data),
   getAppInfo:()=>ipcRenderer.invoke('app:info'),

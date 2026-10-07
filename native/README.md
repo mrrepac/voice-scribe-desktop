@@ -29,6 +29,7 @@ Events:
 {"event":"ready","protocol":1,"pid":1234}
 {"event":"hotkey","action":"dictation-down","target":"123456"}
 {"event":"hotkey","action":"dictation-up","heldMs":501}
+{"event":"hotkey","action":"dictation-abort"}
 {"event":"hotkey","action":"cancel","target":"123456"}
 {"event":"hotkey","action":"proofread","target":"123456"}
 {"event":"hotkey","action":"paste-last","target":"123456"}
@@ -42,6 +43,14 @@ Events:
 - Ctrl+Shift+Space emits `proofread` in Scribe, or during an active session in another
   window. Outside Scribe while idle it passes through. The parent selects the review
   or plain mode using the event's foreground HWND. Bare Enter always passes through.
+- `set-hotkey` with `hotkey` selects the dictation shortcut: `ctrl-space` (default),
+  `ctrl-alt-space` or `win-alt` (left Win + left Alt). Proofreading is the same
+  shortcut plus Shift; shortcuts of unselected presets pass through. Releasing any
+  key of the shortcut ends a hold. The `win-alt` chord never swallows Win or Alt;
+  when it fires, an unassigned key (0xE8) is injected so their release does not
+  open Start or an application menu. A third non-Shift/Ctrl key pressed while the
+  chord is held emits `dictation-abort` and passes through, so Win+Alt+<key>
+  Windows shortcuts keep working.
 - `set-scribe-window` with `target` registers the main Scribe HWND with the router.
 - Ctrl+Alt+V emits `paste-last` with the current foreground HWND.
 - Injected keyboard events are ignored; only recognized shortcuts are emitted.

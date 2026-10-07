@@ -12,7 +12,6 @@ export interface TranscribeOptions extends ModelOptions {
   segment?: boolean;
 }
 export interface CacheBridge {
-  cacheGet(key: string): Promise<ArrayBuffer | null>;
   cachePut(key: string, buffer: ArrayBuffer): Promise<void>;
 }
 interface Pending {
@@ -147,7 +146,7 @@ export class AsrClient {
   }
 
   private onMessage(worker: Worker, message: Exclude<FromWorker, { t: "ready" }>): void {
-    if (message.t === "cache-get" || message.t === "cache-put") {
+    if (message.t === "cache-put") {
       void this.replyCache(worker, message);
       return;
     }
@@ -165,17 +164,15 @@ export class AsrClient {
     else pending.resolve(message.text);
   }
 
-  private async replyCache(worker: Worker, message: Extract<FromWorker, { t: "cache-get" | "cache-put" }>): Promise<void> {
-    let buf: ArrayBuffer | null = null;
+  private async replyCache(worker: Worker, message: Extract<FromWorker, { t: "cache-put" }>): Promise<void> {
     let error: string | undefined;
     try {
-      if (message.t === "cache-get") buf = await this.bridge.cacheGet(message.key);
-      else await this.bridge.cachePut(message.key, message.buf);
+      await this.bridge.cachePut(message.key, message.buf);
     } catch (caught) {
       error = caught instanceof Error ? caught.message : String(caught);
     }
     if (worker !== this.worker) return;
-    worker.postMessage({ t: "cache-reply", id: message.id, buf, error } satisfies ToWorker, buf ? [buf] : []);
+    worker.postMessage({ t: "cache-reply", id: message.id, error } satisfies ToWorker);
   }
 
   private request<T>(worker: Worker, message: (id: number) => ToWorker, progress: ProgressFn, transfer: Transferable[] = []): Promise<T> {

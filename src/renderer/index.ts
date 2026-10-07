@@ -1,6 +1,6 @@
 import { AsrClient, decodeAudioTo16kMono, type ProgressInfo } from '../asr/client';
 import { appendFileTranscript } from '../asr/file-transcript';
-import { makeProofreadBatches } from '../shared/proofread-batch';
+import { makeProofreadBatches, type ProofreadBatch } from '../shared/proofread-batch';
 import { Recorder } from '../asr/recorder';
 import { DEFAULT_SETTINGS, type Settings, type HistoryItem, type Phase, type Command } from '../shared/contracts';
 import { applyVoiceCommands, applyReplacements, parseReplacements } from '../shared/clean';
@@ -16,6 +16,7 @@ import { renderReview, type ReviewBlock } from './proofread-review';
 import type { ProofreadResult, ProofreadMode } from '../shared/proofread';
 import { WorkProgress } from '../shared/work-progress';
 import type { UpdateState } from '../shared/updates';
+import { HOTKEYS } from '../shared/hotkeys';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -167,8 +168,11 @@ function renderWork() {
   return { seconds, progress, remainingSeconds };
 }
 let historyClearing = false;
+// Startup warmup only loads the model; dictation may start and queue behind it.
+let warming = false;
 
 const isBusy = () => historyClearing || !['idle', 'error'].includes(phase);
+const canStart = () => !historyClearing && (['idle', 'error'].includes(phase) || (phase === 'preparing' && warming));
 const valid = (token: number) => token === generation;
 const modelName = (model: Settings['model']) => model === 'auto' ? 'Авто' : model[0].toUpperCase() + model.slice(1);
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
@@ -182,6 +186,7 @@ function toast(message: string, error = false): void {
 }
 
 function setPhase(value: Phase, message?: string): void {
+  if (value !== 'preparing') warming = false;
   if ((value === 'transcribing' || value === 'preparing') && !working()) workStarted = performance.now();
   workProgress.reset(performance.now());
   workStage = '';
@@ -203,13 +208,13 @@ function setPhase(value: Phase, message?: string): void {
     starting: 'Разрешите приложению использовать микрофон, если Windows спросит.',
     recording: session?.target ? 'После остановки текст вставится в выбранное поле.' : '',
     transcribing: '',
-    preparing: 'Первая загрузка может занять несколько минут.',
+    preparing: warming ? 'Диктовку можно начать сразу: распознавание дождётся модели.' : 'Первая загрузка может занять несколько минут.',
     error: message ?? 'Проверьте настройки и начните снова.',
   };
   $('record-title').textContent = titles[value];
   $('record-description').textContent = descriptions[value];
-  recordButton.disabled = !initialized || ['transcribing', 'preparing'].includes(value);
-  const buttonLabel = ({ idle: 'Записать', starting: 'Стоп', recording: 'Стоп', transcribing: 'Распознаём…', preparing: 'Подготовка…', error: 'Повторить' })[value];
+  recordButton.disabled = !initialized || value === 'transcribing' || (value === 'preparing' && !warming);
+  const buttonLabel = ({ idle: 'Записать', starting: 'Стоп', recording: 'Стоп', transcribing: 'Распознаём…', preparing: warming ? 'Записать' : 'Подготовка…', error: 'Повторить' })[value];
   $('record-button-label').textContent = buttonLabel;
   recordButton.setAttribute('aria-label', buttonLabel);
   $('record-icon').querySelector('use')?.setAttribute('href', value === 'recording' || value === 'starting' ? '#i-stop' : '#i-mic');
@@ -384,15 +389,6 @@ function setTranscriptView(view: TranscriptView): void {
   $('transcript-help').textContent = editor.view === 'segments'
     ? `Таймкоды определены автоматически и могут быть неточными. Исправляйте текст в фрагментах.${editor.segments.some(cue => cue.speaker) ? ' Имя оратора меняется во всей расшифровке. Чтобы объединить лишние метки одного голоса, задайте им одинаковое имя. «Не определён» и «Несколько ораторов» меняются только у выбранной реплики.' : ''}${currentHistoryId ? ' Правки сохраняются в истории.' : ''}`
     : 'Текст собран из фрагментов. Для исправлений откройте «Таймкоды».';
-  if (editor.view === 'segments') resizeSegmentEditors();
-}
-
-function resizeSegmentEditors(): void {
-  if ($('transcript-segments').hidden) return;
-  for (const input of document.querySelectorAll<HTMLTextAreaElement>('.segment-text')) {
-    input.style.height = 'auto';
-    input.style.height = `${input.scrollHeight + 2}px`;
-  }
 }
 
 function renderTranscript(): void {
@@ -415,15 +411,12 @@ function renderTranscript(): void {
     input.id = `segment-${index}`;
     input.className = 'segment-text';
     input.value = segment.text;
-    input.rows = Math.max(1, Math.min(6, segment.text.split('\n').length));
     input.spellcheck = true;
     input.readOnly = isBusy();
     input.setAttribute('aria-label', `Фрагмент ${index + 1}, ${time.textContent}`);
     trackCorrectionInput(input);
     input.addEventListener('input', () => {
       editor.editSegment(index, input.value);
-      input.style.height = 'auto';
-      input.style.height = `${input.scrollHeight + 2}px`;
       updateResultText();
       lastResult = editor.text;
       queueHistorySave();
@@ -498,7 +491,8 @@ function flushHistorySave(): void {
   historySaving = historySaving.then(async () => {
     try {
       await api.updateHistory(pending.id, pending.text, pending.details);
-      renderHistory();
+      // The list is rebuilt on navigation; avoid re-rendering it on every edit.
+      if (!$('view-history').hidden) renderHistory();
       if (currentHistoryId === pending.id && historyRevision === pending.revision) $('transcript-save').textContent = 'Правки сохранены';
     } catch (error) {
       if (currentHistoryId === pending.id && historyRevision === pending.revision) $('transcript-save').textContent = 'Правки не сохранены';
@@ -572,7 +566,7 @@ async function complete(text: string, source: 'dictation' | 'file', token: numbe
 }
 
 async function start(target: string | null): Promise<void> {
-  if (!initialized || isBusy() || correctionDialog.open || correctionSaving) return;
+  if (!initialized || !canStart() || correctionDialog.open || correctionSaving) return;
   const token = ++generation;
   const active: Session = {
     token, settings: { ...settings }, recorder: new Recorder(), target, enter: false, proofread: false,
@@ -687,7 +681,7 @@ async function finish(enter = false): Promise<void> {
   } catch (error) { fail(error, token); }
 }
 
-function cancel(message = 'Диктовка отменена'): void {
+function cancel(message = 'Диктовка отменена', notify = true): void {
   if(historyClearing)return;
   if (!isBusy()) return;
   if (fileOptionsDialog.open) fileOptionsDialog.close('cancel');
@@ -703,20 +697,22 @@ function cancel(message = 'Диктовка отменена'): void {
   $('timer').textContent = '00:00';
   restoreEditor();
   setPhase('idle', message);
-  toast(message);
+  if (notify) toast(message);
 }
 
 async function prepare(): Promise<void> {
   if (!initialized || isBusy() || correctionDialog.open || correctionSaving) return;
   const token = ++generation;
+  warming = true;
   setPhase('preparing');
   try {
     const loaded = await asr.prepare(settings, progress => messageProgress(progress, token));
-    if (!valid(token)) return;
+    // A dictation started during warmup supersedes the token, but the model is still ready.
     $('setup-card').hidden = true;
     $('engine-summary').textContent = `${modelName(loaded.model)} · ${loaded.device === 'webgpu' ? 'Видеокарта' : 'Процессор'}`;
+    if (!valid(token)) return;
     setPhase('idle', 'Модель готова');
-    toast('Модель готова. Поставьте курсор в любом приложении и нажмите Ctrl + Space.');
+    toast(`Модель готова. Поставьте курсор в любом приложении и нажмите ${HOTKEYS[settings.hotkey].label}.`);
   } catch (error) { fail(error, token); }
 }
 
@@ -805,6 +801,7 @@ async function proofreadEditor(): Promise<void> {
   const original = editor.snapshot();
   const corrected = editor.snapshot();
   const reviews: ReviewBlock[] = [];
+  let unfinished = '';
   setPhase('transcribing', 'Вычитываем текст…');
   try {
     flushSettingsSave();
@@ -814,15 +811,48 @@ async function proofreadEditor(): Promise<void> {
     if (!valid(token)) return;
     if (corrected.segments.length) {
       const batches=makeProofreadBatches(original.segments);
+      // Paid batches that already succeeded are kept even if a later one fails.
+      const missed: ProofreadBatch[] = [];
+      let lastError: unknown = null;
+      let failedInRow = 0;
       for (let i=0;i<batches.length;i++) {
         setPhase('transcribing', `Вычитываем группу ${i+1} из ${batches.length}…`);
-        const results=await api.proofreadBatch(batches[i]);
+        let results: Awaited<ReturnType<typeof api.proofreadBatch>> | null = null;
+        let fatal = false;
+        for (let attempt=0; attempt<2 && !results; attempt++) {
+          try { results=await api.proofreadBatch(batches[i]); }
+          catch (error) {
+            if (!valid(token)) return;
+            lastError = error;
+            const message = error instanceof Error ? error.message : String(error);
+            fatal = /HTTP (401|403|429)/.test(message);
+            // Auth, quota and timeouts will not improve on an immediate retry.
+            if (fatal || /отменена/.test(message)) break;
+          }
+        }
         if (!valid(token)) return;
+        if (!results) {
+          missed.push(batches[i]);
+          if (fatal || ++failedInRow >= 2) { missed.push(...batches.slice(i+1)); break; }
+          continue;
+        }
+        failedInRow = 0;
         for(const result of results) {
           const segment=corrected.segments[result.id];
           reviews.push({before:segment.text,result,segment:result.id});
           segment.text=result.text;
         }
+      }
+      if (!reviews.length) throw lastError;
+      if (missed.length) {
+        const spans: [number, number][] = [];
+        for (const batch of missed) {
+          const first = batch.cues[0].id + 1, last = batch.cues[batch.cues.length-1].id + 1;
+          if (spans.length && spans[spans.length-1][1] + 1 === first) spans[spans.length-1][1] = last;
+          else spans.push([first, last]);
+        }
+        const ranges = spans.map(([first, last]) => first === last ? String(first) : `${first}–${last}`).join(', ');
+        unfinished = `Фразы ${ranges} не вычитаны и остались без изменений: ${friendlyError(lastError)}`;
       }
     } else {
       const result = await api.proofread(original.text);
@@ -839,8 +869,10 @@ async function proofreadEditor(): Promise<void> {
     setPhase('idle', 'Вычитка завершена');
     queueHistorySave();
     resetCorrectionDraft();
-    $('result-note').textContent = 'Текст вычитан. Можно вернуть исходный вариант, скопировать или сохранить результат.';
-    toast('Вычитка завершена.');
+    $('result-note').textContent = unfinished
+      ? `Текст вычитан частично. ${unfinished} Можно вернуть исходный вариант.`
+      : 'Текст вычитан. Можно вернуть исходный вариант, скопировать или сохранить результат.';
+    if (unfinished) toast(`Вычитка завершена частично. ${unfinished}`, true); else toast('Вычитка завершена.');
   } catch (error) {
     if (!valid(token)) return;
     setPhase('idle');
@@ -924,16 +956,20 @@ async function handleCommand(command: Command): Promise<void> {
   }
   switch (command.action) {
     case 'dictation-down': {
-      const upcoming = isBusy() ? generation : generation + 1;
-      const action = gesture.down(phase, upcoming);
+      const startable = canStart();
+      const action = gesture.down(startable ? 'idle' : phase, startable ? generation + 1 : generation);
       if (action === 'start') await start(command.target || null);
       else if (action === 'stop') await finish();
       break;
     }
     case 'dictation-up': if (gesture.up(command.heldMs, generation)) await finish(); break;
+    case 'dictation-abort':
+      // Win+Alt was the start of a Windows shortcut, not a dictation request.
+      if (gesture.abort(generation) && (phase === 'starting' || phase === 'recording')) cancel('Готово', false);
+      break;
     case 'toggle':
       if (phase === 'starting' || phase === 'recording') await finish();
-      else if (!isBusy()) await start(command.target ?? null);
+      else if (canStart()) await start(command.target ?? null);
       break;
     case 'finish-enter': await finish(true); break;
     case 'proofread':
@@ -970,7 +1006,6 @@ function navigate(view: string): void {
   $('page-name').textContent = ({ dictation: 'Диктовка', history: 'История', settings: 'Настройки' } as Record<string, string>)[view];
   if (view === 'history') renderHistory();
   if (view === 'settings') void refreshMicrophones();
-  if (view === 'dictation') resizeSegmentEditors();
   $('view-' + view).scrollTop = 0;
   window.scrollTo(0, 0);
 }
@@ -1032,7 +1067,8 @@ function renderHistory(): void {
     meta.append(date, actions);
     const body = document.createElement('p');
     body.className = 'history-text';
-    body.textContent = item.text;
+    // Long transcripts are opened in the editor; the list only needs a preview.
+    body.textContent = item.text.length > 600 ? `${item.text.slice(0, 600).trimEnd()}…` : item.text;
     article.append(meta);
     if (item.name) {
       const name = document.createElement('p');
@@ -1046,6 +1082,11 @@ function renderHistory(): void {
   $('history-list').append(fragment);
 }
 
+function renderHotkeyLabels(): void {
+  const keys = HOTKEYS[settings.hotkey];
+  for (const element of document.querySelectorAll<HTMLElement>('[data-hotkey]')) element.textContent = element.dataset.hotkey === 'proofread' ? keys.proofread : keys.label;
+}
+
 function applySettings(): void {
   for (const [name, value] of Object.entries(settings)) {
     const control = form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
@@ -1054,6 +1095,7 @@ function applySettings(): void {
     else control.value = String(value);
   }
   $('engine-summary').textContent = `Whisper · ${modelName(settings.model)} · ${settings.language === 'auto' ? 'Автоязык' : settings.language.toUpperCase()}`;
+  renderHotkeyLabels();
 }
 
 function queueSettingsSave(): void {
@@ -1083,6 +1125,7 @@ function queueSettingsSave(): void {
   }
   $('engine-summary').textContent = `Whisper · ${modelName(settings.model)} · ${settings.language === 'auto' ? 'Автоязык' : settings.language.toUpperCase()}`;
   form.querySelector<HTMLSelectElement>('[name="language2"]')!.value = settings.language2;
+  renderHotkeyLabels();
   $('settings-saved').textContent = 'Сохраняем…';
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSettingsSave, 300);
@@ -1308,7 +1351,6 @@ form.querySelector('[name="replacements"]')?.addEventListener('input', queueSett
 for (const name of ['llmBaseUrl', 'llmModel']) form.querySelector(`[name="${name}"]`)?.addEventListener('input', queueSettingsSave);
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && isBusy()) { event.preventDefault(); cancel(); } });
 navigator.mediaDevices?.addEventListener('devicechange', () => void refreshMicrophones());
-window.addEventListener('resize', resizeSegmentEditors);
 const unsubscribe = api.onCommand(command => { void handleCommand(command); });
 const unsubscribeUpdates = api.onUpdateState(renderUpdate);
 $('update-check').addEventListener('click', () => { void api.checkForUpdates().then(renderUpdate).catch(error => toast(friendlyError(error), true)); });

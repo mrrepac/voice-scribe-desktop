@@ -21,5 +21,12 @@ export class DictationGesture {
     return stop;
   }
 
+  /** The press turned out to be another shortcut; true if it had started this session. */
+  abort(session: number): boolean {
+    const started = this.pressed && this.startedSession === session;
+    this.reset();
+    return started;
+  }
+
   reset(): void { this.pressed = false; this.startedSession = null; }
 }

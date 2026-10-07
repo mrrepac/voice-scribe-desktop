@@ -28,3 +28,11 @@ test('busy processing cannot start another recording or own its release', () => 
   assert.equal(keys.down('transcribing', 1), 'none');
   assert.equal(keys.up(1000, 1), false);
 });
+test('Win+Alt shortcut abort cancels only the recording this press started', () => {
+  const keys = new DictationGesture();
+  keys.down('idle', 4);
+  assert.equal(keys.abort(4), true);
+  assert.equal(keys.up(900, 4), false);
+  keys.down('recording', 4);
+  assert.equal(keys.abort(4), false);
+});

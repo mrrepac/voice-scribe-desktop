@@ -107,7 +107,7 @@
         <span id="setup-card"><button class="text-button" id="prepare-button"><svg aria-hidden="true"><use href="#i-download"/></svg>Подготовить</button></span>
         <button class="text-button" data-go-settings>Настройки</button>
       </div>
-      <footer class="dictation-footer"><kbd>Ctrl + Space</kbd><span>запись в любом приложении</span></footer>
+      <footer class="dictation-footer"><kbd data-hotkey="main">Ctrl + Space</kbd><span>запись в любом приложении</span></footer>
     </section>
     <section id="view-history" class="view" aria-label="История" hidden>
       <div class="history-toolbar">
@@ -161,13 +161,17 @@
                 <select name="silenceSeconds"><option value="0">Только вручную</option><option value="2">2 секунды</option><option value="3">3 секунды</option><option value="5">5 секунд</option><option value="8">8 секунд</option></select>
                 <small>Запись без речи отменяется через 15 секунд.</small>
               </label>
+              <label class="field">Сочетание для диктовки
+                <select name="hotkey"><option value="ctrl-space">Ctrl + Space</option><option value="ctrl-alt-space">Ctrl + Alt + Space</option><option value="win-alt">Левые Win + Alt</option></select>
+                <small>Вычитка — то же сочетание с Shift. Ctrl + Space занят автодополнением в VS Code и JetBrains.</small>
+              </label>
             </div>
             <div class="toggle-row"><div><strong>Голосовые знаки препинания</strong><p>Говорите «запятая», «точка», «новая строка», «новый абзац».</p></div><label class="switch"><input type="checkbox" name="voiceCommands" aria-label="Голосовые знаки препинания"><span></span></label></div>
             <div class="toggle-row"><div><strong>Звуковые сигналы</strong><p>Короткий звук в начале записи и после готового результата.</p></div><label class="switch"><input type="checkbox" name="sounds" aria-label="Звуковые сигналы"><span></span></label></div>
           </div>
           <div class="settings-group">
             <div class="group-heading"><h2>Вычитка через API</h2></div>
-            <div class="toggle-row"><div><strong>Подключить языковую модель</strong><p>По Ctrl + Shift + Space текст отправляется на указанный сервер для вычитки. Аудио не отправляется. Возможна оплата по тарифам провайдера.</p></div><label class="switch"><input type="checkbox" name="llmEnabled" aria-label="Вычитка через API"><span></span></label></div>
+            <div class="toggle-row"><div><strong>Подключить языковую модель</strong><p>По <span data-hotkey="proofread">Ctrl + Shift + Space</span> текст отправляется на указанный сервер для вычитки. Аудио не отправляется. Возможна оплата по тарифам провайдера.</p></div><label class="switch"><input type="checkbox" name="llmEnabled" aria-label="Вычитка через API"><span></span></label></div>
             <div class="settings-grid">
               <label class="field">Провайдер<select id="llm-provider"><option value="custom">Свой адрес</option></select><small>Выберите сервис, в котором получен ваш API-ключ. Ключи сохраняются отдельно для каждого адреса.</small></label>
               <label class="field">Базовый адрес API<input name="llmBaseUrl" type="url" placeholder="https://api.openai.com/v1"><small>Совместимый с OpenAI Chat Completions API. Для локального сервера разрешён HTTP на localhost.</small></label>
@@ -211,9 +215,9 @@
       <details class="keyboard-note">
         <summary>Сочетания клавиш <svg aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
         <dl class="shortcut-list">
-          <div><dt><kbd>Ctrl + Space</kbd></dt><dd>Начать или завершить запись.</dd></div>
-          <div><dt>Удерживайте <kbd>Ctrl + Space</kbd></dt><dd>Диктуйте короткую фразу. Отпустите клавиши, чтобы завершить запись.</dd></div>
-          <div><dt><kbd>Ctrl + Shift + Space</kbd></dt><dd>В другом приложении — завершить диктовку, исправить текст по контексту и вставить без Enter и пометок. В Scribe — вычитать с показом изменений и сомнительных мест, без вставки во внешнее окно. Вне записи сочетание работает только в Scribe. Фразы с таймкодами вычитываются группами с соседним контекстом.</dd></div>
+          <div><dt><kbd data-hotkey="main">Ctrl + Space</kbd></dt><dd>Начать или завершить запись.</dd></div>
+          <div><dt>Удерживайте <kbd data-hotkey="main">Ctrl + Space</kbd></dt><dd>Диктуйте короткую фразу. Отпустите клавиши, чтобы завершить запись.</dd></div>
+          <div><dt><kbd data-hotkey="proofread">Ctrl + Shift + Space</kbd></dt><dd>В другом приложении — завершить диктовку, исправить текст по контексту и вставить без Enter и пометок. В Scribe — вычитать с показом изменений и сомнительных мест, без вставки во внешнее окно. Вне записи сочетание работает только в Scribe. Фразы с таймкодами вычитываются группами с соседним контекстом.</dd></div>
           <div><dt><kbd>Esc</kbd></dt><dd>Отменить запись или распознавание.</dd></div>
         </dl>
       </details>

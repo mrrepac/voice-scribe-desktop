@@ -112,7 +112,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .transcript-segment { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: start; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .transcript-segment:last-child { border-bottom: 0; }
 .segment-time { padding-top: 5px; color: var(--muted); font: 11px/1.65 Consolas, monospace; white-space: nowrap; }
-.result-card .segment-text { min-height: 36px; padding: 3px 6px; border-color: transparent; font-size: 14px; line-height: 1.65; resize: vertical; }
+.result-card .segment-text { field-sizing: content; min-height: 36px; padding: 3px 6px; border-color: transparent; font-size: 14px; line-height: 1.65; resize: vertical; }
 .result-card .segment-text:hover:not(:read-only), .result-card .segment-text:focus { border-color: var(--control-line); }
 .transcript-help { font-size: 11px; }
 .model-row { display: flex; align-items: center; flex-shrink: 0; flex-wrap: wrap; gap: 6px; padding-top: 4px; font-size: 11px; color: var(--muted); }

@@ -46,7 +46,8 @@
       const format = s => String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(Math.floor(s % 60)).padStart(2, '0');
       const working = status.phase === 'transcribing' || status.phase === 'preparing';
       document.getElementById('elapsed').textContent = (working ? 'Прошло ' : '') + format(seconds);
-      document.getElementById('hint').textContent = status.phase === 'recording' ? 'Ctrl + Space · завершить   Esc · отменить' : status.phase === 'idle' || status.phase === 'error' ? 'Ctrl + Space · начать запись' : 'Esc · отменить';
+      const keys = status.hotkey || 'Ctrl + Space';
+      document.getElementById('hint').textContent = status.phase === 'recording' ? keys + ' · завершить   Esc · отменить' : status.phase === 'idle' || status.phase === 'error' ? keys + ' · начать запись' : 'Esc · отменить';
       document.getElementById('meter').style.transform = 'scaleX(' + (reducedMotion.matches ? .5 : Math.max(.05, Math.min(1, (status.level || 0) * 5))) + ')';
       document.getElementById('meter').hidden = working;
       const progress = document.getElementById('progress');

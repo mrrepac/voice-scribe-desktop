@@ -13,7 +13,7 @@ export type ToWorker =
   | { t: "load"; id: number; pref: ModelPref; devicePref: DevicePref }
   | { t: "run"; id: number; pcm: Float32Array; language: string; language2: string; segment: boolean }
   | { t: "run-timed"; id: number; pcm: Float32Array; language: string; language2: string; segment: boolean }
-  | { t: "cache-reply"; id: number; buf: ArrayBuffer | null; error?: string };
+  | { t: "cache-reply"; id: number; error?: string };
 
 export type FromWorker =
   | { t: "ready" }
@@ -23,5 +23,4 @@ export type FromWorker =
   | { t: "text"; id: number; text: string }
   | { t: "transcript"; id: number; transcript: Transcript }
   | { t: "error"; id: number; message: string }
-  | { t: "cache-get"; id: number; key: string }
   | { t: "cache-put"; id: number; key: string; buf: ArrayBuffer };

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { DEFAULT_SETTINGS, type Settings, type HistoryItem } from '../shared/contracts';
 import { normalizeSegments } from '../shared/transcript';
 import { upsertReplacement, type RememberedCorrection } from '../shared/corrections';
+import { isHotkey } from '../shared/hotkeys';
 
 function transcriptDetails(value: unknown): Pick<HistoryItem, 'segments'|'name'> {
   if (!value || typeof value !== 'object') return {};
@@ -24,6 +25,7 @@ export function validateSettings(raw: unknown): Settings {
   for (const k of ['language','language2','microphone','replacements'] as const) if (typeof v[k] === 'string') s[k] = v[k].slice(0, k === 'replacements' ? 50000 : 300);
   for (const k of ['voiceCommands','live','sounds','warmup','startAtLogin','diarization'] as const) if (typeof v[k] === 'boolean') s[k] = v[k];
   if (typeof v.silenceSeconds === 'number' && Number.isFinite(v.silenceSeconds)) s.silenceSeconds = v.silenceSeconds === 0 ? 0 : Math.min(8, Math.max(2,v.silenceSeconds));
+  if (isHotkey(v.hotkey)) s.hotkey = v.hotkey;
   if (typeof v.historyLimit === 'number' && Number.isInteger(v.historyLimit)) s.historyLimit = Math.min(5000,Math.max(100,v.historyLimit));
   return s;
 }
@@ -35,6 +37,8 @@ export function cacheFilename(key: string): string {
 export class Storage {
   private queue: Promise<unknown> = Promise.resolve();
   private reads = new Map<string, Promise<unknown>>();
+  // Last validated on-disk text per document, reused as the next backup without re-reading.
+  private known = new Map<string, string>();
   constructor(readonly root: string, private legacyModels?: string, private recovered: (message: string) => void = () => {}) {}
   async settings(): Promise<Settings> { return validateSettings(await this.read('settings.json', {})); }
   async saveSettings(value: unknown): Promise<Settings> { const s=validateSettings(value); await this.write('settings.json',s); return s; }
@@ -87,22 +91,17 @@ export class Storage {
     });
     return updated!;
   }
-  async cacheGet(key: string): Promise<Buffer|null> {
-    const name=cacheFilename(key);
-    for(const root of [path.join(this.root,'models'),this.legacyModels]) {
-      if(!root) continue;
-      try { const data=await readFile(path.join(root,name)); if(data.length) return data; } catch(e) { if((e as NodeJS.ErrnoException).code!=='ENOENT') throw e; }
-    }
-    return null;
-  }
-  async cacheHas(key: string):Promise<boolean> {
+  /** Model files are streamed to the worker from disk instead of being copied through IPC. */
+  async cacheFile(key: string): Promise<{file: string; size: number}|null> {
     const name=cacheFilename(key);
     for(const root of [path.join(this.root,'models'),this.legacyModels]) {
       if(!root)continue;
-      try{if((await stat(path.join(root,name))).size>0)return true;}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
+      const file=path.join(root,name);
+      try{const {size}=await stat(file);if(size>0)return {file,size};}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
     }
-    return false;
+    return null;
   }
+  async cacheHas(key: string):Promise<boolean> { return (await this.cacheFile(key))!==null; }
   async cachePut(key: string,data: ArrayBuffer):Promise<void> {
     const name=cacheFilename(key);
     const dir=path.join(this.root,'models'); await mkdir(dir,{recursive:true});
@@ -126,7 +125,9 @@ export class Storage {
     let original: string | undefined;
     try {
       original = await readFile(path.join(this.root, name), 'utf8');
-      return this.parse(name, original);
+      const value = this.parse(name, original);
+      this.known.set(name, original);
+      return value;
     } catch (error) {
       if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
@@ -148,14 +149,19 @@ export class Storage {
   private write(name:string,value:unknown):Promise<void> { return this.serial(()=>this.atomic(name,value)); }
   private async atomic(name:string,value:unknown):Promise<void> {
     await mkdir(this.root,{recursive:true});
-    const previous = await this.read(name, value);
-    await this.replace(name + '.bak', JSON.stringify(previous, null, 2));
-    await this.replace(name, JSON.stringify(value, null, 2));
+    const previous = this.known.get(name) ?? this.serialize(name, await this.read(name, value));
+    await this.replace(name + '.bak', previous);
+    await this.replace(name, this.serialize(name, value));
+  }
+  // History can hold many long transcripts; indentation alone adds megabytes to every save.
+  private serialize(name: string, value: unknown): string {
+    return name === 'history.json' ? JSON.stringify(value) : JSON.stringify(value, null, 2);
   }
   private async replace(name: string, text: string): Promise<void> {
     const file = path.join(this.root, name);
     const temp = `${file}.${randomUUID()}.tmp`;
     await writeFile(temp, text, 'utf8');
     await rename(temp, file);
+    this.known.set(name, text);
   }
 }
