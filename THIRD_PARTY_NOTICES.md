@@ -42,9 +42,10 @@ Development tools and their dependencies retain their own notices in
 Speaker diarization uses sherpa-onnx-node 1.13.8 (Next-gen Kaldi team, Apache-2.0;
 licenses/sherpa-onnx-LICENSE.txt), with its native ONNX Runtime (MIT;
 licenses/onnxruntime-LICENSE.txt). The pyannote segmentation 3.0 ONNX model
-(MIT; licenses/pyannote-segmentation-LICENSE.txt) and 3D-Speaker CAMPPlus
-VoxCeleb speaker embeddings (Apache-2.0; licenses/3dspeaker-LICENSE.txt)
+(MIT; licenses/pyannote-segmentation-LICENSE.txt) and the NVIDIA NeMo
+TitaNet Large speaker embedding model (CC-BY-4.0; licenses/titanet-LICENSE.txt)
 are downloaded separately from csukuangfj's Hugging Face repositories.
+The TitaNet model is used unmodified in the ONNX conversion published there.
 Model revisions and SHA-256 digests are pinned in src/main/diarization-worker.ts.
 Sources: https://github.com/k2-fsa/sherpa-onnx and
-https://github.com/modelscope/3D-Speaker.
+https://huggingface.co/nvidia/speakerverification_en_titanet_large.

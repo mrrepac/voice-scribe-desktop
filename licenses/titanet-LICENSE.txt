@@ -1,0 +1,12 @@
+NVIDIA NeMo TitaNet Large (speakerverification_en_titanet_large)
+Copyright (c) NVIDIA Corporation
+
+Licensed under the Creative Commons Attribution 4.0 International License
+(CC BY 4.0). Full license text: https://creativecommons.org/licenses/by/4.0/legalcode
+
+Original model: https://huggingface.co/nvidia/speakerverification_en_titanet_large
+ONNX conversion used by Voice Scribe (unmodified):
+https://huggingface.co/csukuangfj/speaker-embedding-models/blob/0743f301363dec56491a490f6d6cbc9d67f9a3bf/nemo_en_titanet_large.onnx
+
+Voice Scribe does not bundle this model; it is downloaded on first use of
+speaker diarization and verified by its SHA-256 digest.

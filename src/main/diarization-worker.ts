@@ -1,11 +1,13 @@
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import os from 'node:os';
 import path from 'node:path';
 import type { SpeakerTurn } from '../shared/speakers';
 
 const models = [
   { name: 'segmentation.onnx', repo: 'sherpa-onnx-pyannote-segmentation-3-0', revision: '9403a6902bb58e3d5ae8c7e77c3422de279db2e0', file: 'model.onnx', size: 5992913, sha: '220ad67ca923bef2fa91f2390c786097bf305bceb5e261d4af67b38e938e1079' },
-  { name: 'embedding.onnx', repo: 'speaker-embedding-models', revision: '0743f301363dec56491a490f6d6cbc9d67f9a3bf', file: '3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx', size: 29596978, sha: '357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b' },
+  // TitaNet Large: CAM++ VoxCeleb failed to separate a male and a female voice on a Russian podcast.
+  { name: 'embedding.onnx', repo: 'speaker-embedding-models', revision: '0743f301363dec56491a490f6d6cbc9d67f9a3bf', file: 'nemo_en_titanet_large.onnx', size: 101405493, sha: 'd51abcf31717ef28162f26acb9d44dd4127c3d44c9b8624f699f3425daca8e77' },
 ];
 const report = (message: string) => process.send?.({ type: 'progress', message });
 const hash = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
@@ -59,10 +61,13 @@ process.once('message', async (message: { pcm?: Float32Array; pcmPath?: string; 
     const { OfflineSpeakerDiarization } = require('sherpa-onnx-node') as {
       OfflineSpeakerDiarization: new (config: unknown) => { sampleRate: number; process(pcm: Float32Array): SpeakerTurn[] };
     };
+    // Inference scales almost linearly with cores; keep one free for the interface.
+    const threads = Math.max(2, Math.min(16, os.availableParallelism() - 1));
     const engine = new OfflineSpeakerDiarization({
-      segmentation: { pyannote: { model: segmentation }, numThreads: 2, provider: 'cpu' },
-      embedding: { model: embedding, numThreads: 2, provider: 'cpu' },
-      clustering: { numClusters: message.speakerCount ?? -1, threshold: 0.5 },
+      segmentation: { pyannote: { model: segmentation }, numThreads: threads, provider: 'cpu' },
+      embedding: { model: embedding, numThreads: threads, provider: 'cpu' },
+      // Tuned for TitaNet: 0.7–0.9 found two speakers, 0.5 split them into six.
+      clustering: { numClusters: message.speakerCount ?? -1, threshold: 0.8 },
       minDurationOn: 0.2, minDurationOff: 0.5,
     });
     if (engine.sampleRate !== 16000) throw new Error('Неподдерживаемая частота модели ораторов');
