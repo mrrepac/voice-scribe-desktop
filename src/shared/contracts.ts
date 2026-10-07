@@ -61,7 +61,7 @@ export interface ScribeAPI {
   pickAudio(): Promise<import('../main/audio-import').AudioFile | null>;
   droppedAudio(file: File): Promise<import('../main/audio-import').AudioFile>;
   prepareAudio(id: string): Promise<{samples: number; duration: number}>;
-  audioChunk(id: string, offset: number, limit?: number): Promise<Float32Array>;
+  audioChunk(id: string, offset: number): Promise<Float32Array>;
   releaseAudio(id: string): Promise<void>;
   cancelAudio(): Promise<void>;
   diarizeAudio(id: string, speakerCount?: number): Promise<SpeakerTurn[]>;

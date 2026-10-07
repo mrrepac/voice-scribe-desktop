@@ -64,13 +64,10 @@ export class AudioImport {
     } catch (error) { await this.release(id); throw error; }
   }
 
-  /** A limit below one minute is an exact speaker change: cut there, not at a pause. */
-  async chunk(id: string, offset: number, limit?: number): Promise<Float32Array> {
+  async chunk(id: string, offset: number): Promise<Float32Array> {
     const entry = this.get(id);
     if (!entry.pcm || !entry.samples || !Number.isInteger(offset) || offset < 0 || offset >= entry.samples) throw new Error('Некорректный фрагмент аудио');
-    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error('Некорректный фрагмент аудио');
-    const exact = limit !== undefined && limit < AUDIO_CHUNK_SECONDS * RATE;
-    const count = Math.min(exact ? limit : AUDIO_CHUNK_SECONDS * RATE, entry.samples - offset);
+    const count = Math.min(AUDIO_CHUNK_SECONDS * RATE, entry.samples - offset);
     const pcm = new Float32Array(count);
     const file = await open(entry.pcm, 'r');
     try {
@@ -83,7 +80,7 @@ export class AudioImport {
       }
     } finally { await file.close(); }
     // Prefer a quiet boundary near the end, avoiding cuts in the middle of words.
-    if (!exact && offset + count < entry.samples) {
+    if (offset + count < entry.samples) {
       let best = count, energy = Infinity;
       for (let end = count - 2 * RATE; end <= count; end += 160) {
         let sum = 0;
