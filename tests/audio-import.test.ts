@@ -33,6 +33,11 @@ test('real decoder reads bounded chunks and releases disk files; malformed files
     let total=0;
     while(total<samples){const chunk=await service.chunk(file.id,total);assert.ok(chunk.length<=rate*60);total+=chunk.length;}
     assert.equal(total,samples);
+    // A speaker change is cut exactly, without searching for a nearby pause.
+    assert.equal((await service.chunk(file.id,rate,rate*2+7)).length,rate*2+7);
+    assert.equal((await service.chunk(file.id,rate*64,rate*10)).length,rate);
+    await assert.rejects(service.chunk(file.id,0,0));
+    await assert.rejects(service.chunk(file.id,0,1.5));
     await assert.rejects(service.chunk(file.id,-1));
     await service.release(file.id);assert.deepEqual(await readdir(temp),[]);
     await writeFile(source,'broken');

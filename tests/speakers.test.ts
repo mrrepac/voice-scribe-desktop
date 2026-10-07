@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { assignSpeakers } from '../src/shared/speakers';
+import { assignSpeakers, speakerCuts } from '../src/shared/speakers';
 import { normalizeSegments, formatSubtitles, transcriptText } from '../src/shared/transcript';
 import { TranscriptEditor } from '../src/renderer/transcript-editor';
 import { Storage, validateSettings } from '../src/main/storage';
@@ -19,6 +19,27 @@ test('mixed, simultaneous, and unmatched cues are explicit instead of inventing 
   const cues = [{ start: 0, end: 4, text: 'mixed' }, { start: 5, end: 8, text: 'overlap' }, { start: 9, end: 10, text: 'unknown' }];
   const result = assignSpeakers(cues, [{ start: 0, end: 2, speaker: 0 }, { start: 2, end: 4, speaker: 1 }, { start: 5, end: 8, speaker: 0 }, { start: 5, end: 8, speaker: 1 }, { start: 9, end: 10, speaker: NaN }]);
   assert.deepEqual(result.map(c => c.speaker), ['Несколько ораторов', 'Несколько ораторов', 'Не определён']);
+});
+
+test('cues in a short pause take the adjacent voice', () => {
+  const result = assignSpeakers([{ start: 3.2, end: 3.8, text: 'drifted' }, { start: 10, end: 11, text: 'far' }], [{ start: 0, end: 3, speaker: 2 }, { start: 4.5, end: 6, speaker: 5 }]);
+  assert.deepEqual(result.map(c => c.speaker), ['Оратор 1', 'Не определён']);
+});
+
+test('speaker cuts split pauses in the middle and keep overlaps with the first voice', () => {
+  assert.deepEqual(speakerCuts([], 10), []);
+  assert.deepEqual(speakerCuts([{ start: 0, end: 4, speaker: 1 }, { start: 5, end: 9, speaker: 0 }], 10), [4.5]);
+  // B interrupts while A still talks: the cut is where A stops.
+  assert.deepEqual(speakerCuts([{ start: 0, end: 4, speaker: 1 }, { start: 3, end: 8, speaker: 0 }], 10), [4]);
+  // Same voice across a pause and a back-channel inside it: no cut at all.
+  assert.deepEqual(speakerCuts([{ start: 0, end: 10, speaker: 1 }, { start: 4, end: 5, speaker: 0 }, { start: 11, end: 14, speaker: 1 }], 15), []);
+});
+
+test('voices too short for Whisper join a neighbour instead of becoming separate chunks', () => {
+  const turns = [{ start: 0, end: 4, speaker: 0 }, { start: 4.1, end: 4.4, speaker: 1 }, { start: 4.5, end: 8, speaker: 0 }, { start: 8, end: 12, speaker: 2 }];
+  assert.deepEqual(speakerCuts(turns, 12), [8]);
+  assert.deepEqual(speakerCuts([{ start: 0, end: 0.3, speaker: 1 }, { start: 0.4, end: 5, speaker: 0 }, { start: 5, end: 9, speaker: 1 }], 9), [5]);
+  assert.deepEqual(speakerCuts(turns, 12, 0.2), [4.05, 4.45, 8]);
 });
 
 test('labels are bounded, escaped in subtitles, editable and preserved in snapshots', () => {

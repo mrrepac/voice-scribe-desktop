@@ -9,7 +9,7 @@ import { DictationGesture } from './gesture';
 import { deliveryMessage } from './delivery-message';
 import { formatTimestamp, normalizeSegments, transcriptText, type TranscriptDetails, type SubtitleFormat } from '../shared/transcript';
 import { TranscriptEditor, type TranscriptView } from './transcript-editor';
-import { assignSpeakers } from '../shared/speakers';
+import { assignSpeakers, speakerCuts, type SpeakerTurn } from '../shared/speakers';
 import { inferCorrection } from '../shared/corrections';
 import { PROVIDERS, providerFor } from '../shared/providers';
 import { renderReview, type ReviewBlock } from './proofread-review';
@@ -757,9 +757,33 @@ async function pickFile(dropped?: File): Promise<void> {
     if (!valid(token) || !audioId) return;
     const audio = await api.prepareAudio(audioId);
     if (!valid(token)) return;
+    // Voices first: Whisper then gets audio cut at every speaker change, so a
+    // cue never mixes two people and its label needs no word alignment.
+    let turns: SpeakerTurn[] | null = null;
+    let speakerNote = '';
+    if (options.diarization) {
+      setPhase('transcribing', 'Определяем ораторов');
+      const unsubscribe = api.onDiarizationProgress(progress => {
+        if (!valid(token)) return;
+        statusMessage = progress.message;
+        $('status-label').textContent = progress.message;
+        $('record-description').textContent = progress.message + '. Аудио остаётся на компьютере.';
+      });
+      try {
+        turns = await api.diarizeAudio(audioId, speakerCount);
+      } catch (error) {
+        if (!valid(token)) return;
+        speakerNote = 'Ораторы не определены: ' + friendlyError(error) + '. Текст сохранён.';
+      } finally { unsubscribe(); }
+      if (!valid(token)) return;
+      setPhase('transcribing');
+      $('record-description').textContent = file.name;
+    }
+    const cuts = turns ? speakerCuts(turns, audio.duration).map(seconds => Math.round(seconds * 16000)) : [];
     const transcript: import('../shared/transcript').Transcript = {text:'',segments:[]};
     for (let offset = 0; offset < audio.samples;) {
-      const pcm = await api.audioChunk(audioId, offset);
+      const cut = cuts.find(sample => sample > offset);
+      const pcm = await api.audioChunk(audioId, offset, cut === undefined ? undefined : cut - offset);
       if (!valid(token)) return;
       const part = await asr.transcribeTimed(pcm, options, progress => messageProgress(progress.stage==='run' && typeof progress.pct==='number' ? {...progress,pct:(offset+pcm.length*progress.pct/100)/audio.samples*100}:progress, token));
       if (!valid(token)) return;
@@ -769,25 +793,10 @@ async function pickFile(dropped?: File): Promise<void> {
     }
     if (!valid(token)) return;
     let segments = normalizeSegments(transcript.segments.map(segment => ({ ...segment, text: processText(segment.text, options) })));
-    let speakerNote = '';
-    if (options.diarization && segments.length) {
-      setPhase('transcribing', 'Определяем ораторов');
-      const unsubscribe = api.onDiarizationProgress(progress => {
-        if (!valid(token)) return;
-        statusMessage = progress.message;
-        $('status-label').textContent = progress.message;
-        $('record-description').textContent = progress.message + '. Аудио остаётся на компьютере.';
-      });
-      try {
-        const turns = await api.diarizeAudio(audioId, speakerCount);
-        if (!valid(token)) return;
-        segments = assignSpeakers(segments, turns);
-        const count = new Set(turns.map(turn => turn.speaker)).size;
-        speakerNote = count ? 'Ораторов найдено: ' + count + '. Метки можно исправить в таймкодах.' : 'Не удалось определить ораторов.';
-      } catch (error) {
-        if (!valid(token)) return;
-        speakerNote = 'Ораторы не определены: ' + friendlyError(error) + '. Текст сохранён.';
-      } finally { unsubscribe(); }
+    if (turns && segments.length) {
+      segments = assignSpeakers(segments, turns);
+      const count = new Set(turns.map(turn => turn.speaker)).size;
+      speakerNote = count ? 'Ораторов найдено: ' + count + '. Метки можно исправить в таймкодах.' : 'Не удалось определить ораторов.';
     }
     if (!valid(token)) return;
     const text = transcript.segments.length ? transcriptText(segments) : processText(transcript.text, options);

@@ -174,7 +174,7 @@ function setupIpc():void {
   handle('speakers:cancel',()=>diarization.cancel());
   handle('audio:select',source=>audioImport.select(textArg(source)));
   handle('audio:prepare',id=>audioImport.prepare(textArg(id)));
-  handle('audio:chunk',(id,offset)=>audioImport.chunk(textArg(id),offset));
+  handle('audio:chunk',(id,offset,limit)=>audioImport.chunk(textArg(id),offset,limit));
   handle('audio:release',id=>audioImport.release(textArg(id)));
   handle('audio:cancel',()=>{diarization.cancel();return audioImport.cancelAll();});
   handle('audio:diarize',(id,count)=>diarization.runFile(audioImport.pcmPath(textArg(id)),value=>{if(!win.isDestroyed())win.webContents.send('speakers:progress',value);},count));
