@@ -10,8 +10,6 @@ updates:
       # Minor and patch updates arrive as one PR; each major update gets its own.
       npm-minor-patch:
         update-types: [minor, patch]
-    commit-message:
-      prefix: Update
 
   - package-ecosystem: github-actions
     directory: /
@@ -21,5 +19,3 @@ updates:
     groups:
       actions:
         patterns: ['*']
-    commit-message:
-      prefix: Update
