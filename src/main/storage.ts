@@ -35,7 +35,7 @@ export function validateSettings(raw: unknown): Settings {
 }
 export function cacheFilename(key: string): string {
   const u = new URL(key);
-  if (u.protocol !== 'https:' || u.hostname !== 'huggingface.co' || u.search || u.hash || !/^\/onnx-community\/whisper-(tiny|base|small|large-v3-turbo)\/resolve\/main\/[a-zA-Z0-9_./-]+$/.test(u.pathname)) throw new Error('Invalid model cache key');
+  if (u.protocol !== 'https:' || u.hostname !== 'huggingface.co' || u.search || u.hash || !/^\/onnx-community\/whisper-(tiny|base|small|large-v3-turbo)\/resolve\/(main|[0-9a-f]{40})\/[a-zA-Z0-9_./-]+$/.test(u.pathname)) throw new Error('Invalid model cache key');
   return key.replace(/^https?:\/\//,'').replace(/[^a-zA-Z0-9._-]+/g,'_');
 }
 export class Storage {

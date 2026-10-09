@@ -10,6 +10,8 @@ execFileSync(process.execPath, ['node_modules/electron/install.js'], { stdio: 'i
 execFileSync(process.execPath, ['node_modules/ffmpeg-static/install.js'], { stdio: 'inherit', windowsHide: true });
 await mkdir('dist/ort', { recursive: true });
 await build({entryPoints:['src/main/index.ts'],outfile:'dist/main.cjs',platform:'node',format:'cjs',bundle:true,external:['electron','electron-updater'],target:'node22'});
+// Smoke tests are loaded only with --smoke-test; packaged builds keep them for release checks.
+await build({entryPoints:['src/main/smoke.ts'],outfile:'dist/smoke-main.cjs',platform:'node',format:'cjs',bundle:true,external:['electron','electron-updater'],target:'node22'});
 await build({entryPoints:['src/main/diarization-worker.ts'],outfile:'dist/diarization-worker.cjs',platform:'node',format:'cjs',bundle:true,external:['sherpa-onnx-node'],target:'node22'});
 await build({entryPoints:['src/main/gigaam-worker.ts'],outfile:'dist/gigaam-worker.cjs',platform:'node',format:'cjs',bundle:true,external:['sherpa-onnx-node'],target:'node22'});
 await build({entryPoints:['src/main/preload.ts'],outfile:'dist/preload.cjs',platform:'node',format:'cjs',bundle:true,external:['electron'],target:'node22'});

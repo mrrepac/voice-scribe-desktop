@@ -2,9 +2,8 @@ import { readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { ModelEntry, ModelId } from '../shared/models';
 
-const WHISPER = 'huggingface.co_onnx-community_whisper-';
 /** Turbo HQ only adds this file; its decoder and configuration come from Turbo. */
-const TURBO_HQ_FILE = `${WHISPER}large-v3-turbo_resolve_main_onnx_encoder_model_fp16.onnx`;
+const TURBO_HQ_FILE = /^huggingface\.co_onnx-community_whisper-large-v3-turbo_resolve_[0-9a-z]+_onnx_encoder_model_fp16\.onnx/;
 
 const NAMES: Record<ModelId, string> = {
   tiny: 'Whisper Tiny', base: 'Whisper Base', small: 'Whisper Small', turbo: 'Whisper Turbo',
@@ -14,7 +13,7 @@ const ORDER = Object.keys(NAMES) as ModelId[];
 
 /** Which model a file in the Whisper cache directory belongs to (temporary files included). */
 export function whisperModelOf(name: string): ModelId | null {
-  if (name.startsWith(TURBO_HQ_FILE)) return 'turbo-hq';
+  if (TURBO_HQ_FILE.test(name)) return 'turbo-hq';
   const match = /^huggingface\.co_onnx-community_whisper-(tiny|base|small|large-v3-turbo)_/.exec(name);
   if (!match) return null;
   return match[1] === 'large-v3-turbo' ? 'turbo' : match[1] as ModelId;

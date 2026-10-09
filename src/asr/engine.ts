@@ -3,6 +3,7 @@ import { cleanTranscript, trimSilence } from "../shared/clean";
 import { Segmenter, joinSegments } from "../shared/live";
 import type { Segment } from "../shared/live";
 import type { Transcript, TranscriptSegment } from "../shared/transcript";
+import { WHISPER_REVISIONS } from "../shared/whisper";
 
 /*
  * Минимальные типы transformers.js. Библиотека приезжает динамическим import(),
@@ -43,6 +44,7 @@ type Dtype = "q8" | "q4" | "fp16" | "fp32" | { encoder_model: string; decoder_mo
 interface PipelineOptions {
   device: Device;
   dtype: Dtype;
+  revision?: string;
   session_options?: { logSeverityLevel: number };
   progress_callback?: (p: TfProgress) => void;
 }
@@ -401,6 +403,7 @@ async function getPipelineInner(pref: ModelPref, devicePref: DevicePref, onProgr
     pipeline("automatic-speech-recognition", modelId, {
       device: dev,
       dtype: dtypeFor(model, dev, useF16),
+      revision: WHISPER_REVISIONS[modelId],
       // Уровень логов задаётся на самой сессии (глобальный env.logLevel ORT
       // игнорирует): 3 = Error, глушит W:VerifyEachNodeIsAssignedToAnEp.
       session_options: { logSeverityLevel: 3 },

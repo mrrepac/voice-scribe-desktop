@@ -2,6 +2,7 @@
 import { getPipeline, noteCacheMiss, planDownload, runAsr, runAsrTimed, setHost } from "./engine";
 import type { CacheLike, Loaded, ProgressInfo } from "./engine";
 import type { FromWorker, ToWorker } from "./protocol";
+import { whisperCacheKey } from "../shared/whisper";
 
 declare const self: {
   location: Location;
@@ -31,7 +32,10 @@ function storeInCache(key: string, buf: ArrayBuffer): Promise<void> {
   });
 }
 
-const keyOf = (request: string | { url?: string }) => typeof request === "string" ? request : request.url;
+const keyOf = (request: string | { url?: string }) => {
+  const url = typeof request === "string" ? request : request.url;
+  return url && whisperCacheKey(url);
+};
 const diskCache: CacheLike = {
   async match(request) {
     const key = keyOf(request);

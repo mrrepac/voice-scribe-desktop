@@ -2,6 +2,7 @@
 import { AsrClient, decodeAudioTo16kMono } from './client';
 import type { ModelOptions, ProgressInfo, DownloadPlan, LoadedInfo } from './client';
 import type { Transcript } from '../shared/transcript';
+import { whisperCacheKey, whisperFileUrl } from '../shared/whisper';
 
 export async function runAsrSmoke(options: ModelOptions & { prepare?: boolean; audio?: ArrayBuffer; timeoutMs?: number; timestamps?: boolean; checkIsolation?: boolean }) {
   const client = new AsrClient();
@@ -35,8 +36,7 @@ export async function runAsrSmoke(options: ModelOptions & { prepare?: boolean; a
       const cacheHas = (window.scribe as unknown as { cacheHas?: (key: string) => Promise<boolean> }).cacheHas;
       if (cacheHas) {
         const files = [...plan.files, 'config.json', 'generation_config.json', 'preprocessor_config.json', 'tokenizer.json', 'tokenizer_config.json'];
-        const prefix = `https://huggingface.co/${plan.modelId}/resolve/main/`;
-        const cached = await Promise.all(files.map(file => cacheHas(prefix + file)));
+        const cached = await Promise.all(files.map(file => cacheHas(whisperCacheKey(whisperFileUrl(plan!.modelId, file)))));
         missingFiles = files.filter((_file, index) => !cached[index]);
         cacheCheck = missingFiles.length ? 'missing' : 'ready';
         if (missingFiles.length) throw new Error(`SMOKE_CACHE_MISS: ${missingFiles.join(', ')}`);
