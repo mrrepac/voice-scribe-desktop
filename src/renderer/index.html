@@ -181,7 +181,8 @@
               </label>
               <label class="field">Сочетание для диктовки
                 <select name="hotkey"><option value="ctrl-space">Ctrl + Space</option><option value="ctrl-alt-space">Ctrl + Alt + Space</option><option value="win-alt">Левые Win + Alt</option></select>
-                <small>Вычитка — то же сочетание с Shift. Ctrl + Space занят автодополнением в VS Code и JetBrains.</small>
+                <button type="button" class="text-button field-action" id="hotkey-capture">Назначить свою клавишу</button>
+                <small id="hotkey-hint">Вычитка — то же сочетание с Shift. Ctrl + Space занят автодополнением в VS Code и JetBrains.</small>
               </label>
             </div>
             <div class="toggle-row"><div><strong>Голосовые знаки препинания</strong><p>Говорите «запятая», «точка», «новая строка», «новый абзац».</p></div><label class="switch"><input type="checkbox" name="voiceCommands" aria-label="Голосовые знаки препинания"><span></span></label></div>

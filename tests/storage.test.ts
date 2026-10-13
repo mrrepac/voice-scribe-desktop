@@ -60,6 +60,8 @@ test('settings reject unsafe values and bound memory usage',()=>{
   assert.equal(settings.model,'auto');assert.equal(settings.device,'auto');assert.equal(settings.silenceSeconds,2);assert.equal(settings.startAtLogin,false);assert.equal(settings.replacements.length,50000);
   assert.equal(validateSettings({hotkey:'toString'}).hotkey,'ctrl-space');
   assert.equal(validateSettings({hotkey:'win-alt'}).hotkey,'win-alt');
+  assert.equal(validateSettings({hotkey:'key:ctrl+win+82'}).hotkey,'key:ctrl+win+82');
+  assert.equal(validateSettings({hotkey:'key:65'}).hotkey,'ctrl-space');
 });
 test('model keys only access allowed Whisper repositories',()=>{
   assert.equal(cacheFilename('https://huggingface.co/onnx-community/whisper-tiny/resolve/main/config.json'),'huggingface.co_onnx-community_whisper-tiny_resolve_main_config.json');

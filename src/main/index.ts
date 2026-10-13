@@ -18,7 +18,7 @@ import { autoUpdater } from 'electron-updater';
 import { UpdateService } from './updates';
 import { AudioImport } from './audio-import';
 import { NativeRecovery } from './native-recovery';
-import { HOTKEYS, type Hotkey } from '../shared/hotkeys';
+import { hotkeyLabels, type CapturedKey, type Hotkey } from '../shared/hotkeys';
 import { effectiveModel } from '../shared/models';
 import { Log } from './log';
 
@@ -79,8 +79,25 @@ function configureNativeWindow():void {
 function applyHotkey(value:Hotkey):void {
   hotkey=value;
   if(bridge.ready)void bridge.request('set-hotkey',{hotkey}).catch(error=>console.error('Hotkey change failed',error));
-  if(lastStatus.phase==='idle')tray?.setToolTip(`Voice Scribe · ${HOTKEYS[hotkey].label}`);
-  if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:HOTKEYS[hotkey].label});
+  if(lastStatus.phase==='idle')tray?.setToolTip(`Voice Scribe · ${hotkeyLabels(hotkey).label}`);
+  if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:hotkeyLabels(hotkey).label});
+}
+let finishCapture:((key:CapturedKey|null)=>void)|null=null;
+// The helper swallows and reports one key press; Esc alone cancels.
+function captureHotkey():Promise<CapturedKey|null> {
+  if(active())return Promise.reject(new Error('Дождитесь завершения записи или обработки'));
+  finishCapture?.(null);
+  return new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>finish(null),15000);
+    const finish=(key:CapturedKey|null)=>{
+      if(finishCapture!==finish)return;
+      finishCapture=null; clearTimeout(timer);
+      if(!key)void bridge.request('cancel-capture').catch(()=>{});
+      resolve(key && !(key.key===0x1b && !key.ctrl && !key.alt && !key.win && !key.shift)?key:null);
+    };
+    finishCapture=finish;
+    bridge.request('capture-hotkey').catch(error=>{if(finishCapture===finish){finishCapture=null;clearTimeout(timer);reject(error);}});
+  });
 }
 // Ctrl+Shift+Space in another application proofreads its selection only when proofreading can run.
 function applySelection(settings:{llmEnabled:boolean;llmModel:string}):void {
@@ -93,7 +110,7 @@ function showOverlay():void {
 }
 function makeTray():void {
   const icon=nativeImage.createFromPath(path.join(root,'dist/icon.png')).resize({width:24,height:24});
-  tray=new Tray(icon); tray.setToolTip(`Voice Scribe · ${HOTKEYS[hotkey].label}`); tray.on('double-click',show); refreshTray();
+  tray=new Tray(icon); tray.setToolTip(`Voice Scribe · ${hotkeyLabels(hotkey).label}`); tray.on('double-click',show); refreshTray();
 }
 function refreshTray():void {
   tray?.setContextMenu(Menu.buildFromTemplate([
@@ -327,6 +344,8 @@ function setupIpc():void {
   handle('cache:has',key=>storage.cacheHas(textArg(key)));
   handle('cache:put',(key,data)=>{if(!(data instanceof ArrayBuffer) || data.byteLength>1_000_000_000) throw new Error('Invalid cache data');return storage.cachePut(textArg(key),data);});
   handle('app:info',()=>({version:app.getVersion(),dataPath:storage.root,nativeReady:bridge.ready}));
+  handle('hotkey:capture',captureHotkey);
+  handle('hotkey:cancel-capture',()=>finishCapture?.(null));
   handle('native:health',()=>nativeRecovery.state);
   handle('native:restart',()=>{if(active())throw new Error('Дождитесь завершения записи или обработки');nativeRecovery.restart();});
   ipcMain.on('hide',event=>{if(event.sender===win.webContents)win.hide();});
@@ -350,7 +369,7 @@ function setupIpc():void {
     clearTimeout(noticeTimer);
     if(!smoke && active() && !win.isFocused())showOverlay();
     else overlay?.hide();
-    if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:HOTKEYS[hotkey].label});
+    if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:hotkeyLabels(hotkey).label});
   });
 }
 // Renderer warnings and errors (model fallbacks, microphone failures) go to the log too.
@@ -393,6 +412,7 @@ else {
     session.defaultSession.setPermissionRequestHandler((contents,permission,callback,details)=>callback(contents===win?.webContents && permission==='media' && trusted(details.requestingUrl) && (!('mediaTypes' in details) || !details.mediaTypes || details.mediaTypes.every(t=>t==='audio'))));
     session.defaultSession.setPermissionCheckHandler((contents,permission,origin)=>contents===win?.webContents && permission==='media' && trusted(origin));
     if(smoke)session.defaultSession.webRequest.onBeforeRequest({urls:['http://*/*','https://*/*']},(_details,callback)=>callback({cancel:true}));
+    bridge.on('captured',event=>finishCapture?.({key:event.key,ctrl:event.ctrl,alt:event.alt,win:event.win,shift:event.shift}));
     bridge.on('hotkey',event=>{
       if(!win || win.isDestroyed())return;
       const own=event.target===ownWindowId();

@@ -53,6 +53,8 @@ export class NativeBridge extends EventEmitter {
         this.emit('ready');
       } else if (msg.event === 'hotkey') {
         this.emit('hotkey', msg);
+      } else if (msg.event === 'hotkey-captured') {
+        this.emit('captured', msg);
       } else if (msg.event === 'error') {
         this.fail(new Error(msg.message || msg.error || 'Windows helper error'), child);
       }

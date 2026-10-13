@@ -19,7 +19,7 @@ import { WorkProgress } from '../shared/work-progress';
 import { effectiveModel, type ModelEntry } from '../shared/models';
 import { applyProfile, findProfile, normalizeApp, type AppProfile } from '../shared/profiles';
 import type { UpdateState } from '../shared/updates';
-import { HOTKEYS } from '../shared/hotkeys';
+import { capturedHotkey, hotkeyLabels, isHotkey } from '../shared/hotkeys';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -881,7 +881,7 @@ async function prepare(): Promise<void> {
     $('engine-summary').textContent = `${modelName(loaded.model)} · ${loaded.device === 'webgpu' ? 'Видеокарта' : 'Процессор'}${reduced}`;
     if (!valid(token)) return;
     setPhase('idle', 'Модель готова');
-    toast(`Модель готова. Поставьте курсор в любом приложении и нажмите ${HOTKEYS[settings.hotkey].label}.`);
+    toast(`Модель готова. Поставьте курсор в любом приложении и нажмите ${hotkeyLabels(settings.hotkey).label}.`);
   } catch (error) { fail(error, token); }
 }
 
@@ -1318,7 +1318,7 @@ function renderHistory(): void {
 }
 
 function renderHotkeyLabels(): void {
-  const keys = HOTKEYS[settings.hotkey];
+  const keys = hotkeyLabels(settings.hotkey);
   for (const element of document.querySelectorAll<HTMLElement>('[data-hotkey]')) element.textContent = element.dataset.hotkey === 'proofread' ? keys.proofread : keys.label;
 }
 
@@ -1401,7 +1401,48 @@ function addProfile(): void {
   queueSettingsSave();
 }
 
+const HOTKEY_HINT = 'Вычитка — то же сочетание с Shift. Ctrl + Space занят автодополнением в VS Code и JetBrains.';
+let hotkeyCapturing = false;
+/** A custom shortcut is shown as an extra option next to the presets. */
+function syncHotkeyOption(): void {
+  const select = form.querySelector<HTMLSelectElement>('[name="hotkey"]')!;
+  select.querySelector('option[data-custom]')?.remove();
+  if (!settings.hotkey.startsWith('key:')) return;
+  const option = new Option(hotkeyLabels(settings.hotkey).label, settings.hotkey);
+  option.dataset.custom = '';
+  select.add(option);
+}
+async function captureHotkey(): Promise<void> {
+  const button = $<HTMLButtonElement>('hotkey-capture');
+  if (hotkeyCapturing) { void api.cancelHotkeyCapture(); return; }
+  hotkeyCapturing = true;
+  button.textContent = 'Отменить';
+  $('hotkey-hint').textContent = 'Нажмите клавишу или сочетание с Ctrl, Alt или Win. Esc — отмена.';
+  let error = '';
+  try {
+    const key = await api.captureHotkey();
+    if (key) {
+      const result = capturedHotkey(key);
+      if ('error' in result) error = result.error;
+      else if (isHotkey(result.hotkey)) {
+        settings = { ...settings, hotkey: result.hotkey };
+        syncHotkeyOption();
+        form.querySelector<HTMLSelectElement>('[name="hotkey"]')!.value = result.hotkey;
+        queueSettingsSave();
+        toast(`Диктовка: ${hotkeyLabels(result.hotkey).label}, вычитка: ${hotkeyLabels(result.hotkey).proofread}.`);
+      }
+    }
+  } catch (cause) { error = friendlyError(cause); }
+  finally {
+    hotkeyCapturing = false;
+    button.textContent = 'Назначить свою клавишу';
+    $('hotkey-hint').textContent = HOTKEY_HINT;
+  }
+  if (error) toast(error, true);
+}
+
 function applySettings(): void {
+  syncHotkeyOption();
   for (const [name, value] of Object.entries(settings)) {
     const control = form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
     if (!control) continue;
@@ -1718,6 +1759,7 @@ $('history-clear-dialog').addEventListener('close',()=>{
   });
 });
 $('refresh-mics').addEventListener('click', () => void refreshMicrophones());
+$('hotkey-capture').addEventListener('click', () => void captureHotkey());
 $('profile-add-button').addEventListener('click', addProfile);
 $('profile-app').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addProfile(); } });
 function renderNativeHealth(state: import('../main/native-recovery').NativeHealth): void {

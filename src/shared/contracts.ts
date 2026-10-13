@@ -89,6 +89,9 @@ export interface ScribeAPI {
   cacheHas(key: string): Promise<boolean>;
   cachePut(key: string, data: ArrayBuffer): Promise<void>;
   getAppInfo(): Promise<{version: string; dataPath: string; nativeReady: boolean}>;
+  /** Records the next key press system-wide; null when cancelled with Esc or timed out. */
+  captureHotkey(): Promise<import('./hotkeys').CapturedKey | null>;
+  cancelHotkeyCapture(): Promise<void>;
   getNativeHealth(): Promise<import('../main/native-recovery').NativeHealth>;
   restartNative(): Promise<void>;
   onNativeHealth(handler: (state: import('../main/native-recovery').NativeHealth)=>void): () => void;

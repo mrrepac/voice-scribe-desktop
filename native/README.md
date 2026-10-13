@@ -51,6 +51,15 @@ Events:
   open Start or an application menu. A third non-Shift/Ctrl key pressed while the
   chord is held emits `dictation-abort` and passes through, so Win+Alt+<key>
   Windows shortcuts keep working.
+- `set-hotkey` also accepts a custom shortcut: `key:` + optional `ctrl+`, `alt+`,
+  `win+` (in this order) + a decimal virtual-key code, e.g. `key:ctrl+alt+120`
+  (Ctrl+Alt+F9) or `key:20` (CapsLock alone). Modifiers must match exactly; Shift
+  again means proofreading. Modifier keys and Escape cannot be the main key. When
+  the shortcut has Win, or Alt without Ctrl, the 0xE8 mask is injected as for `win-alt`.
+- `capture-hotkey` reports the next physical non-modifier key press, swallowing it
+  and its release, as `{"event":"hotkey-captured","key":120,"ctrl":false,"alt":false,"win":false,"shift":false}`.
+  This is the only case where an ordinary key leaves the helper, and only on this
+  explicit request. `cancel-capture` stops waiting.
 - `set-scribe-window` with `target` registers the main Scribe HWND with the router.
 - Ctrl+Alt+V emits `paste-last` with the current foreground HWND.
 - Injected keyboard events are ignored; only recognized shortcuts are emitted.

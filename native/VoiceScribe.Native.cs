@@ -22,7 +22,12 @@ namespace VoiceScribe.Native
         private bool chordDown;
         private long pressedAt;
         private string hotkey = "ctrl-space";
+        // The selected non-chord shortcut: a main key plus exactly these modifiers.
+        private int mainKey = Space;
+        private bool needControl = true, needAlt, needWin;
         internal bool Active;
+        // Set by capture-hotkey: the next physical non-modifier key press is reported and swallowed.
+        internal bool Capturing;
         // Idle Ctrl+Shift+Space in another window proofreads its selection (API proofreading is configured).
         internal bool Selection;
         internal string ScribeWindow;
@@ -31,9 +36,30 @@ namespace VoiceScribe.Native
         // Injects a neutral key so a modifier-only chord does not open Start or an app menu.
         internal Action Mask = delegate { };
 
+        private static bool IsModifier(int key)
+        {
+            return IsShiftOrControl(key) || key == 0x12 || key == 0xa4 || key == 0xa5 || key == LeftWin || key == 0x5c;
+        }
+
+        // "key:" + optional "ctrl+", "alt+", "win+" in this order + a virtual-key code.
+        private static bool ParseCustom(string value, out int key, out bool control, out bool alt, out bool win)
+        {
+            key = 0; control = alt = win = false;
+            if (value == null || !value.StartsWith("key:", StringComparison.Ordinal)) return false;
+            string rest = value.Substring(4);
+            if (rest.StartsWith("ctrl+", StringComparison.Ordinal)) { control = true; rest = rest.Substring(5); }
+            if (rest.StartsWith("alt+", StringComparison.Ordinal)) { alt = true; rest = rest.Substring(4); }
+            if (rest.StartsWith("win+", StringComparison.Ordinal)) { win = true; rest = rest.Substring(4); }
+            if (rest.Length == 0 || rest.Length > 3) return false;
+            foreach (char c in rest) if (c < '0' || c > '9') return false;
+            key = int.Parse(rest, CultureInfo.InvariantCulture);
+            return key >= 0x07 && key <= 0xfe && key != 0xe8 && key != Escape && !IsModifier(key);
+        }
+
         internal static bool IsHotkey(string value)
         {
-            return value == "ctrl-space" || value == "ctrl-alt-space" || value == "win-alt";
+            int key; bool control, alt, win;
+            return value == "ctrl-space" || value == "ctrl-alt-space" || value == "win-alt" || ParseCustom(value, out key, out control, out alt, out win);
         }
 
         internal string Hotkey
@@ -43,6 +69,13 @@ namespace VoiceScribe.Native
             {
                 if (!IsHotkey(value)) throw new ArgumentException("unknown-hotkey");
                 hotkey = value;
+                if (!ParseCustom(value, out mainKey, out needControl, out needAlt, out needWin))
+                {
+                    mainKey = Space;
+                    needControl = true;
+                    needAlt = value == "ctrl-alt-space";
+                    needWin = false;
+                }
                 dictationPressed = false;
                 chordDown = false;
             }
@@ -55,8 +88,10 @@ namespace VoiceScribe.Native
 
         private bool ReleasesDictation(int key)
         {
-            if (key == Space || key == 0x11 || key == 0xa2 || key == 0xa3) return true;
-            return hotkey == "ctrl-alt-space" && (key == 0x12 || key == 0xa4 || key == 0xa5);
+            if (key == mainKey) return true;
+            if (needControl && (key == 0x11 || key == 0xa2 || key == 0xa3)) return true;
+            if (needAlt && (key == 0x12 || key == 0xa4 || key == 0xa5)) return true;
+            return needWin && (key == LeftWin || key == 0x5c);
         }
 
         private void EmitDictationUp()
@@ -106,6 +141,16 @@ namespace VoiceScribe.Native
         internal bool Handle(int key, bool down, bool control, bool shift, bool alt, bool win, bool injected, string target)
         {
             if (injected) return false;
+            if (Capturing && down && !IsModifier(key))
+            {
+                Capturing = false;
+                suppressed.Add(key);
+                emit(new Dictionary<string, object> {
+                    { "event", "hotkey-captured" }, { "key", key },
+                    { "ctrl", control }, { "alt", alt }, { "win", win }, { "shift", shift }
+                });
+                return true;
+            }
             bool chord = hotkey == "win-alt";
             if (chord && (key == LeftWin || key == LeftAlt)) return HandleChord(key, down, control, shift, target);
             if (!down)
@@ -124,8 +169,10 @@ namespace VoiceScribe.Native
             }
 
             string action = null;
-            if (!chord && key == Space && control && alt == (hotkey == "ctrl-alt-space") && !win)
+            if (!chord && key == mainKey && control == needControl && alt == needAlt && win == needWin)
             {
+                // A swallowed key leaves Alt or Win "unused": their release would open a menu or Start.
+                if (needWin || (needAlt && !needControl)) Mask();
                 if (!shift)
                 {
                     action = "dictation-down";
@@ -319,6 +366,14 @@ namespace VoiceScribe.Native
                     string hotkey = Value(command, "hotkey") as string;
                     if (!HotkeyRouter.IsHotkey(hotkey)) { Reply(id, false, "unknown-hotkey"); return; }
                     router.Hotkey = hotkey;
+                    Reply(id, true, null);
+                    break;
+                case "capture-hotkey":
+                    router.Capturing = true;
+                    Reply(id, true, null);
+                    break;
+                case "cancel-capture":
+                    router.Capturing = false;
                     Reply(id, true, null);
                     break;
                 case "get-target":
@@ -538,7 +593,7 @@ namespace VoiceScribe.Native
 
         private static void EmitHotkey(Dictionary<string, object> value)
         {
-            if ((string)value["action"] == "cancel")
+            if (value.ContainsKey("action") && (string)value["action"] == "cancel")
             {
                 // Cancel synchronously in the hook, before the parent receives Escape.
                 Dictionary<string, object> result = TakeCancelledInsert();
@@ -740,6 +795,31 @@ namespace VoiceScribe.Native
                 held.Remove(0x5b); held.Remove(0xa4);
                 expect(!alt.Handle(0xa4, true, false, false, true, false, false, "5") && events.Count == count + 4, "stale Win state is ignored");
                 expect(!alt.Handle(0x20, true, true, false, false, false, false, "5"), "Ctrl+Space is free with Win+Alt");
+                expect(!HotkeyRouter.IsHotkey("key:27") && !HotkeyRouter.IsHotkey("key:162") && !HotkeyRouter.IsHotkey("key:alt+ctrl+120") && !HotkeyRouter.IsHotkey("key:1200"), "invalid custom shortcuts rejected");
+                alt.Hotkey = "key:120";
+                count = events.Count;
+                expect(!alt.Handle(0x20, true, true, false, false, false, false, "5"), "Ctrl+Space is free with a custom key");
+                expect(!alt.Handle(0x78, true, true, false, false, false, false, "5") && events.Count == count, "F9 with extra Ctrl passes through");
+                expect(alt.Handle(0x78, true, false, false, false, false, false, "5") && (string)events[count]["action"] == "dictation-down", "bare F9 starts");
+                expect(alt.Handle(0x78, true, false, false, false, false, false, "5") && events.Count == count + 1, "F9 repeat suppressed");
+                now += 400;
+                expect(alt.Handle(0x78, false, false, false, false, false, false, "5") && (long)events[count + 1]["heldMs"] == 400, "releasing F9 ends hold");
+                alt.ScribeWindow = "5";
+                expect(alt.Handle(0x78, true, false, true, false, false, false, "5") && (string)events[count + 2]["action"] == "proofread", "Shift+F9 proofreads");
+                alt.Handle(0x78, false, false, true, false, false, false, "5");
+                alt.Hotkey = "key:win+75";
+                count = events.Count;
+                int before = masks;
+                expect(alt.Handle(0x4b, true, false, false, false, true, false, "5") && (string)events[count]["action"] == "dictation-down" && masks == before + 1, "Win+K starts and masks Start menu");
+                expect(!alt.Handle(0x5b, false, false, false, false, false, false, "5") && events.Count == count + 2, "releasing Win ends hold");
+                expect(alt.Handle(0x4b, false, false, false, false, false, false, "5") && events.Count == count + 2, "key release swallowed without a second event");
+                alt.Capturing = true;
+                count = events.Count;
+                expect(!alt.Handle(0xa2, true, true, false, false, false, false, "5") && events.Count == count, "capture waits for a main key");
+                expect(alt.Handle(0x51, true, true, false, true, false, false, "5") && (string)events[count]["event"] == "hotkey-captured", "capture swallows and reports a key");
+                expect((int)events[count]["key"] == 0x51 && (bool)events[count]["ctrl"] && (bool)events[count]["alt"] && !(bool)events[count]["win"], "capture reports modifiers");
+                expect(!alt.Capturing && alt.Handle(0x51, false, true, false, true, false, false, "5"), "capture ends; release swallowed");
+                expect(!alt.Handle(0x51, true, true, false, true, false, false, "5") && events.Count == count + 1, "keys pass through after capture");
                 Emit(new Dictionary<string, object> { { "event", "self-test" }, { "ok", true }, { "checks", checks } });
                 return 0;
             }

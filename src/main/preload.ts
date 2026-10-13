@@ -50,6 +50,8 @@ const api: ScribeAPI = {
   cacheHas:key=>ipcRenderer.invoke('cache:has',key),
   cachePut:(key,data)=>ipcRenderer.invoke('cache:put',key,data),
   getAppInfo:()=>ipcRenderer.invoke('app:info'),
+  captureHotkey:()=>ipcRenderer.invoke('hotkey:capture'),
+  cancelHotkeyCapture:()=>ipcRenderer.invoke('hotkey:cancel-capture'),
   getNativeHealth:()=>ipcRenderer.invoke('native:health'),
   restartNative:()=>ipcRenderer.invoke('native:restart'),
   onNativeHealth:handler=>{const fn=(_:unknown,state:import('./native-recovery').NativeHealth)=>handler(state);ipcRenderer.on('native:health',fn);return()=>ipcRenderer.removeListener('native:health',fn);},
