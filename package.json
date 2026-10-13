@@ -106,5 +106,8 @@
     "type": "git",
     "url": "https://github.com/mrrepac/voice-scribe-desktop.git"
   },
-  "homepage": "https://github.com/mrrepac/voice-scribe-desktop"
+  "homepage": "https://github.com/mrrepac/voice-scribe-desktop",
+  "overrides": {
+    "sharp": "0.35.5"
+  }
 }
