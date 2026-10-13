@@ -1403,20 +1403,21 @@ function addProfile(): void {
 
 const HOTKEY_HINT = 'Вычитка — то же сочетание с Shift. Ctrl + Space занят автодополнением в VS Code и JetBrains.';
 let hotkeyCapturing = false;
-/** A custom shortcut is shown as an extra option next to the presets. */
+/** A custom shortcut is shown as an extra option before "Своя клавиша…". */
 function syncHotkeyOption(): void {
   const select = form.querySelector<HTMLSelectElement>('[name="hotkey"]')!;
   select.querySelector('option[data-custom]')?.remove();
   if (!settings.hotkey.startsWith('key:')) return;
   const option = new Option(hotkeyLabels(settings.hotkey).label, settings.hotkey);
   option.dataset.custom = '';
-  select.add(option);
+  select.add(option, select.querySelector<HTMLOptionElement>('option[value="capture"]'));
 }
 async function captureHotkey(): Promise<void> {
-  const button = $<HTMLButtonElement>('hotkey-capture');
-  if (hotkeyCapturing) { void api.cancelHotkeyCapture(); return; }
+  const select = form.querySelector<HTMLSelectElement>('[name="hotkey"]')!;
+  select.value = settings.hotkey;
+  if (hotkeyCapturing) return;
   hotkeyCapturing = true;
-  button.textContent = 'Отменить';
+  select.disabled = true;
   $('hotkey-hint').textContent = 'Нажмите клавишу или сочетание с Ctrl, Alt или Win. Esc — отмена.';
   let error = '';
   try {
@@ -1427,7 +1428,7 @@ async function captureHotkey(): Promise<void> {
       else if (isHotkey(result.hotkey)) {
         settings = { ...settings, hotkey: result.hotkey };
         syncHotkeyOption();
-        form.querySelector<HTMLSelectElement>('[name="hotkey"]')!.value = result.hotkey;
+        select.value = result.hotkey;
         queueSettingsSave();
         toast(`Диктовка: ${hotkeyLabels(result.hotkey).label}, вычитка: ${hotkeyLabels(result.hotkey).proofread}.`);
       }
@@ -1435,7 +1436,7 @@ async function captureHotkey(): Promise<void> {
   } catch (cause) { error = friendlyError(cause); }
   finally {
     hotkeyCapturing = false;
-    button.textContent = 'Назначить свою клавишу';
+    select.disabled = false;
     $('hotkey-hint').textContent = HOTKEY_HINT;
   }
   if (error) toast(error, true);
@@ -1759,7 +1760,12 @@ $('history-clear-dialog').addEventListener('close',()=>{
   });
 });
 $('refresh-mics').addEventListener('click', () => void refreshMicrophones());
-$('hotkey-capture').addEventListener('click', () => void captureHotkey());
+// "Своя клавиша…" records a shortcut instead of being saved as a setting.
+form.querySelector('[name="hotkey"]')!.addEventListener('change', event => {
+  if ((event.target as HTMLSelectElement).value !== 'capture') return;
+  event.stopPropagation();
+  void captureHotkey();
+});
 $('profile-add-button').addEventListener('click', addProfile);
 $('profile-app').addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addProfile(); } });
 function renderNativeHealth(state: import('../main/native-recovery').NativeHealth): void {
