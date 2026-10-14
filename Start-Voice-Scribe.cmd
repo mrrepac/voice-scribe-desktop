@@ -1,8 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-
-if exist "%~dp0release\win-unpacked\Voice Scribe.exe" goto launch_packaged
+rem Always builds and runs the sources; a packaged build in release\ may be outdated.
 
 set "SCRIBE_NODE="
 if exist "%ProgramFiles%\nodejs\node.exe" set "SCRIBE_NODE=%ProgramFiles%\nodejs\node.exe"
@@ -18,12 +17,8 @@ if errorlevel 1 goto build_failed
 start "" "%~dp0node_modules\electron\dist\electron.exe" "%~dp0." %*
 exit /b 0
 
-:launch_packaged
-start "" "%~dp0release\win-unpacked\Voice Scribe.exe" %*
-exit /b 0
-
 :missing_node
-echo Node.js was not found. Install Node.js 22 or newer, or use the packaged app.
+echo Node.js was not found. Install Node.js 22 or newer, or use the installer.
 echo See README.md for instructions.
 pause
 exit /b 1

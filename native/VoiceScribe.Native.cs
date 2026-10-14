@@ -141,9 +141,12 @@ namespace VoiceScribe.Native
             this.emit = emit;
         }
 
-        internal bool Handle(int key, bool down, bool control, bool shift, bool alt, bool win, bool injected, string target)
+        // `ignored` is input this helper injected itself (or from a low-integrity process).
+        // Keys emulated by other programs, such as a mouse button bound to Enter in
+        // Logitech software or an AutoHotkey remap, are handled like physical ones.
+        internal bool Handle(int key, bool down, bool control, bool shift, bool alt, bool win, bool ignored, string target)
         {
-            if (injected) return false;
+            if (ignored) return false;
             if (Capturing && down && !IsModifier(key))
             {
                 Capturing = false;
@@ -217,6 +220,9 @@ namespace VoiceScribe.Native
         private const uint WM_KEYDOWN = 0x100, WM_KEYUP = 0x101, WM_SYSKEYDOWN = 0x104, WM_SYSKEYUP = 0x105;
         private const uint WM_COMMAND_QUEUE = 0x8001, WM_TIMER = 0x113;
         private const uint KEYEVENTF_KEYUP = 0x0002;
+        private const uint LLKHF_LOWER_IL_INJECTED = 0x02, LLKHF_INJECTED = 0x10;
+        // Marks this helper's own SendInput keys (Ctrl+V, Enter, the 0xE8 mask) so the hook skips them.
+        private static readonly UIntPtr OwnInput = new UIntPtr(0x56534352); // "VSCR"
         private static readonly ConcurrentQueue<Dictionary<string, object>> commands = new ConcurrentQueue<Dictionary<string, object>>();
         private static readonly object outputLock = new object();
         private static readonly Stopwatch clock = Stopwatch.StartNew();
@@ -568,8 +574,10 @@ namespace VoiceScribe.Native
                 if (down || up)
                 {
                     KBDLLHOOKSTRUCT data = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
+                    bool ignored = (data.flags & LLKHF_INJECTED) != 0
+                        && (data.dwExtraInfo == OwnInput || (data.flags & LLKHF_LOWER_IL_INJECTED) != 0);
                     if (router.Handle((int)data.vkCode, down, Down(0x11), Down(0x10), Down(0x12), Down(0x5b) || Down(0x5c),
-                        (data.flags & 0x10) != 0, WindowString(GetForegroundWindow()))) return new IntPtr(1);
+                        ignored, WindowString(GetForegroundWindow()))) return new IntPtr(1);
                 }
             }
             return CallNextHookEx(hook, code, wParam, lParam);
@@ -579,7 +587,7 @@ namespace VoiceScribe.Native
 
         private static INPUT KeyInput(ushort key, bool up)
         {
-            return new INPUT { type = 1, data = new INPUTUNION { keyboard = new KEYBDINPUT { wVk = key, dwFlags = up ? KEYEVENTF_KEYUP : 0 } } };
+            return new INPUT { type = 1, data = new INPUTUNION { keyboard = new KEYBDINPUT { wVk = key, dwFlags = up ? KEYEVENTF_KEYUP : 0, dwExtraInfo = OwnInput } } };
         }
 
         private static bool InputLayoutValid() { return Marshal.SizeOf(typeof(INPUT)) == (IntPtr.Size == 8 ? 40 : 28); }
@@ -664,7 +672,7 @@ namespace VoiceScribe.Native
                 expect(!test.Handle(0xa2, false, false, false, false, false, false, "123"), "Ctrl keyup passes through");
                 expect((long)events[3]["heldMs"] == 700, "releasing Ctrl ends hold");
                 expect(test.Handle(0x20, false, false, false, false, false, false, "123") && events.Count == 4, "release emitted exactly once");
-                expect(!test.Handle(0x20, true, true, false, false, false, true, "123"), "injected keys ignored");
+                expect(!test.Handle(0x20, true, true, false, false, false, true, "123"), "own injected keys ignored");
                 test.Active = true;
                 expect(test.Handle(0x20, true, true, true, false, false, false, "123"), "explicit finish shortcut");
                 expect((string)events[4]["action"] == "finish", "finish event");

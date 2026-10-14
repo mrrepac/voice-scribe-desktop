@@ -60,7 +60,10 @@ Events:
   This is the only case where an ordinary key leaves the helper, and only on this
   explicit request. `cancel-capture` stops waiting.
 - Ctrl+Alt+V emits `paste-last` with the current foreground HWND.
-- Injected keyboard events are ignored; only recognized shortcuts are emitted.
+- Keys the helper injects itself (Ctrl+V, Enter, the 0xE8 mask) carry the `dwExtraInfo`
+  marker 0x56534352 and are ignored, as is input from low-integrity processes. Keys
+  emulated by other programs (mouse buttons bound to keys, AutoHotkey remaps) work
+  like physical ones. Only recognized shortcuts are emitted.
 
 Commands and representative replies:
 
