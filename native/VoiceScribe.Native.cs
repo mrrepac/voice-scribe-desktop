@@ -29,9 +29,6 @@ namespace VoiceScribe.Native
         internal bool Active;
         // Set by capture-hotkey: the next physical non-modifier key press is reported and swallowed.
         internal bool Capturing;
-        // Idle Ctrl+Shift+Space in another window proofreads its selection (API proofreading is configured).
-        internal bool Selection;
-        internal string ScribeWindow;
         // Bare Enter during a dictation finishes it and presses Enter after insertion.
         internal bool EnterFinishes;
         // Physical state of a key other than the one being handled.
@@ -131,7 +128,7 @@ namespace VoiceScribe.Native
                 dictationPressed = true;
                 pressedAt = clock();
             }
-            else if (target == ScribeWindow || Active || Selection) action = "proofread";
+            else if (Active) action = "finish";
             if (action != null) emit(new Dictionary<string, object> {
                 { "event", "hotkey" }, { "action", action }, { "target", target }
             });
@@ -198,7 +195,8 @@ namespace VoiceScribe.Native
                     dictationPressed = true;
                     pressedAt = clock();
                 }
-                else if (target == ScribeWindow || Active || Selection) action = "proofread";
+                // The shortcut plus Shift finishes a running dictation; while idle it passes through.
+                else if (Active) action = "finish";
             }
             else if (key == V && control && alt && !shift && !win) action = "paste-last";
             else if (key == Escape && Active && !control && !shift && !alt && !win) action = "cancel";
@@ -229,7 +227,6 @@ namespace VoiceScribe.Native
         private static UIntPtr timer;
         private static volatile bool closing;
         private static PendingInsert pending;
-        private static PendingCopy copying;
 
         private sealed class PendingInsert
         {
@@ -239,16 +236,6 @@ namespace VoiceScribe.Native
             internal bool PasteSent;
             internal long Deadline;
             internal long EnterAfter;
-        }
-
-        private sealed class PendingCopy
-        {
-            internal object Id;
-            internal IntPtr Target;
-            internal bool CopySent;
-            internal uint Sequence;
-            internal long ChangedAt;
-            internal long Deadline;
         }
 
         private static int Main(string[] args)
@@ -314,7 +301,7 @@ namespace VoiceScribe.Native
                         Dictionary<string, object> command;
                         while (commands.TryDequeue(out command)) ProcessCommand(command);
                     }
-                    else if (message.message == WM_TIMER) { AdvanceInsert(); AdvanceCopy(); }
+                    else if (message.message == WM_TIMER) AdvanceInsert();
                     TranslateMessage(ref message);
                     DispatchMessage(ref message);
                 }
@@ -368,18 +355,9 @@ namespace VoiceScribe.Native
             string action = Value(command, "command") as string;
             switch (action)
             {
-                case "set-scribe-window":
-                    router.ScribeWindow = Value(command, "target") as string;
-                    Reply(id, true, null);
-                    break;
                 case "set-active":
                     if (!(Value(command, "active") is bool)) { Reply(id, false, "active-must-be-boolean"); return; }
                     router.Active = (bool)command["active"];
-                    Reply(id, true, null);
-                    break;
-                case "set-selection":
-                    if (!(Value(command, "enabled") is bool)) { Reply(id, false, "enabled-must-be-boolean"); return; }
-                    router.Selection = (bool)command["enabled"];
                     Reply(id, true, null);
                     break;
                 case "set-enter-finish":
@@ -417,13 +395,9 @@ namespace VoiceScribe.Native
                 case "insert":
                     BeginInsert(id, command);
                     break;
-                case "copy-selection":
-                    BeginCopy(id, command);
-                    break;
                 case "cancel-insert":
-                    bool cancelled = pending != null || copying != null;
+                    bool cancelled = pending != null;
                     CancelPendingInsert();
-                    if (copying != null) FinishCopy(false, "cancelled");
                     Emit(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "cancelled", cancelled } });
                     break;
                 case "quit":
@@ -470,7 +444,7 @@ namespace VoiceScribe.Native
 
         private static void BeginInsert(object id, Dictionary<string, object> command)
         {
-            if (pending != null || copying != null) { Reply(id, false, "insert-busy"); return; }
+            if (pending != null) { Reply(id, false, "insert-busy"); return; }
             object enter = Value(command, "enter");
             if (enter != null && !(enter is bool)) { Reply(id, false, "enter-must-be-boolean"); return; }
             IntPtr target;
@@ -517,65 +491,6 @@ namespace VoiceScribe.Native
             uint enterSent = SendInput((uint)enterInputs.Length, enterInputs, Marshal.SizeOf(typeof(INPUT)));
             if (enterSent > 0 && enterSent != enterInputs.Length) ReleaseInjectedKeys(true);
             FinishInsert("inserted", enterSent == enterInputs.Length ? null : "enter-blocked", enterSent == enterInputs.Length);
-        }
-
-        // Copies the target window's selection with Ctrl+C once the shortcut's modifiers are released.
-        // The parent reads the clipboard; this only reports whether the application changed it.
-        private static void BeginCopy(object id, Dictionary<string, object> command)
-        {
-            if (pending != null || copying != null) { Reply(id, false, "insert-busy"); return; }
-            IntPtr target;
-            if (!TryWindow(Value(command, "target"), out target)) { Reply(id, false, "invalid-target"); return; }
-            copying = new PendingCopy { Id = id, Target = target, Deadline = clock.ElapsedMilliseconds + 2000 };
-            AdvanceCopy();
-        }
-
-        private static void AdvanceCopy()
-        {
-            if (copying == null) return;
-            long now = clock.ElapsedMilliseconds;
-            if (!copying.CopySent)
-            {
-                if (!IsWindow(copying.Target) || GetForegroundWindow() != copying.Target) { FinishCopy(false, "target-changed"); return; }
-                if (ModifiersDown() || Down(0x43))
-                {
-                    if (now >= copying.Deadline) FinishCopy(false, "modifiers-held");
-                    return;
-                }
-                copying.Sequence = GetClipboardSequenceNumber();
-                INPUT[] inputs = { KeyInput(0x11, false), KeyInput(0x43, false), KeyInput(0x43, true), KeyInput(0x11, true) };
-                uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
-                if (sent != inputs.Length)
-                {
-                    if (sent > 0)
-                    {
-                        INPUT[] releases = { KeyInput(0x43, true), KeyInput(0x11, true) };
-                        SendInput((uint)releases.Length, releases, Marshal.SizeOf(typeof(INPUT)));
-                    }
-                    FinishCopy(false, "input-blocked");
-                    return;
-                }
-                copying.CopySent = true;
-                copying.Deadline = now + 1000;
-                return;
-            }
-            // Applications may empty the clipboard before filling it: wait until it settles.
-            uint sequence = GetClipboardSequenceNumber();
-            if (sequence != copying.Sequence) { copying.Sequence = sequence; copying.ChangedAt = now; return; }
-            if (copying.ChangedAt > 0 && now - copying.ChangedAt >= 80) { FinishCopy(true, null); return; }
-            if (now >= copying.Deadline) FinishCopy(copying.ChangedAt > 0, copying.ChangedAt > 0 ? null : "nothing-copied");
-        }
-
-        private static void FinishCopy(bool copied, string reason)
-        {
-            PendingCopy operation = copying;
-            copying = null;
-            Dictionary<string, object> result = new Dictionary<string, object> {
-                { "id", operation.Id }, { "ok", true }, { "status", copied ? "copied" : "not-copied" },
-                { "sent", operation.CopySent }
-            };
-            if (reason != null) result["reason"] = reason;
-            Emit(result);
         }
 
         private static void ReleaseInjectedKeys(bool enter)
@@ -751,9 +666,8 @@ namespace VoiceScribe.Native
                 expect(test.Handle(0x20, false, false, false, false, false, false, "123") && events.Count == 4, "release emitted exactly once");
                 expect(!test.Handle(0x20, true, true, false, false, false, true, "123"), "injected keys ignored");
                 test.Active = true;
-                test.ScribeWindow = "123";
                 expect(test.Handle(0x20, true, true, true, false, false, false, "123"), "explicit finish shortcut");
-                expect((string)events[4]["action"] == "proofread", "proofread event");
+                expect((string)events[4]["action"] == "finish", "finish event");
                 test.Handle(0x20, false, true, true, false, false, false, "123");
                 expect(!test.Handle(0x0d, true, false, false, false, false, false, "123"), "bare Enter always passes through");
                 expect(test.Handle(0x1b, true, false, false, false, false, false, "123"), "active Escape suppressed");
@@ -772,20 +686,14 @@ namespace VoiceScribe.Native
                 expect((string)cancelled["status"] == "inserted" && (bool)cancelled["entered"] == false, "cancel after paste prevents Enter");
                 expect(TakeCancelledInsert() == null, "cancelling idle insertion is harmless");
                 int count = events.Count;
-                expect(test.Handle(0x20, true, true, true, false, false, false, "123"), "idle proofreading shortcut");
-                expect(events.Count == count + 1 && (string)events[count]["action"] == "proofread", "idle proofreading emits once");
-                expect(test.Handle(0x20, true, true, true, false, false, false, "123") && events.Count == count + 1, "proofreading repeat suppressed");
+                expect(!test.Handle(0x20, true, true, true, false, false, false, "123") && events.Count == count, "idle finish shortcut passes through");
                 test.Handle(0x20, false, true, true, false, false, false, "123");
-                expect(!test.Handle(0x20, true, true, true, false, false, false, "999"), "idle external shortcut passes through");
-                test.Selection = true;
-                count = events.Count;
-                expect(test.Handle(0x20, true, true, true, false, false, false, "999"), "idle external shortcut proofreads selection");
-                expect(events.Count == count + 1 && (string)events[count]["action"] == "proofread" && (string)events[count]["target"] == "999", "selection proofreading keeps originating window");
-                test.Handle(0x20, false, true, true, false, false, false, "999");
-                test.Selection = false;
                 test.Active = true;
-                expect(test.Handle(0x20, true, true, true, false, false, false, "999"), "active external shortcut stops dictation");
-                expect((string)events[events.Count - 1]["action"] == "proofread" && (string)events[events.Count - 1]["target"] == "999", "external proofreading keeps originating window");
+                expect(test.Handle(0x20, true, true, true, false, false, false, "999"), "active finish shortcut in another window");
+                expect(events.Count == count + 1 && (string)events[count]["action"] == "finish", "finish emits once");
+                expect(test.Handle(0x20, true, true, true, false, false, false, "999") && events.Count == count + 1, "finish repeat suppressed");
+                test.Handle(0x20, false, true, true, false, false, false, "999");
+                test.Active = false;
                 HashSet<int> held = new HashSet<int>();
                 int masks = 0;
                 HotkeyRouter alt = new HotkeyRouter(delegate { return now; }, events.Add);
@@ -923,6 +831,5 @@ namespace VoiceScribe.Native
         [DllImport("user32.dll")] private static extern void PostQuitMessage(int code);
         [DllImport("user32.dll")] private static extern UIntPtr SetTimer(IntPtr window, UIntPtr id, uint interval, IntPtr callback);
         [DllImport("user32.dll")] private static extern bool KillTimer(IntPtr window, UIntPtr id);
-        [DllImport("user32.dll")] private static extern uint GetClipboardSequenceNumber();
     }
 }

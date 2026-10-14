@@ -15,7 +15,8 @@ import { Log } from './log';
 import { migrateFromOlderApps } from './migration';
 import MODEL from '../shared/gigaam-model.json';
 
-const smoke = process.argv.includes('--smoke-test');
+// Smoke tests ship only with source checkouts; installed builds ignore the flags.
+const smoke = !app.isPackaged && process.argv.includes('--smoke-test');
 // A fake microphone plays the Russian fixture once (see tests/gigaam-fixture.ps1).
 if(smoke && process.argv.includes('--dictation-test')){
   app.commandLine.appendSwitch('use-fake-device-for-media-stream');
@@ -23,7 +24,7 @@ if(smoke && process.argv.includes('--dictation-test')){
 }
 const NAME='Voice Scribe';
 const root = app.getAppPath();
-if(smoke)app.setPath('userData',path.join(process.cwd(),'.data',app.isPackaged?'smoke-packaged':'smoke'));
+if(smoke)app.setPath('userData',path.join(process.cwd(),'.data','smoke'));
 else if (!app.isPackaged) app.setPath('userData',path.join(root,'.data'));
 app.setName(NAME);
 const log=new Log(path.join(app.getPath('userData'),'logs'));
@@ -38,6 +39,7 @@ let deliveryGeneration=0;
 let lastStatus:Status={phase:'idle',message:'Готов к диктовке'};
 let hotkey:Hotkey='ctrl-space';
 let enterFinishes=true;
+let restorePrevious=false;
 let overlayShown=false;
 const bridge=new NativeBridge();
 const nativeRecovery=new NativeRecovery(bridge,app.isPackaged?path.join(process.resourcesPath,'native/VoiceScribe.Native.exe'):path.join(root,'native/bin/VoiceScribe.Native.exe'),state=>{
@@ -73,9 +75,6 @@ function windowId(window:BrowserWindow):string {
   return handle.length===8?handle.readBigUInt64LE().toString():handle.readUInt32LE().toString();
 }
 function ownWindowId():string { return windowId(win); }
-function configureNativeWindow():void {
-  if(win && !win.isDestroyed() && bridge.ready)void bridge.request('set-scribe-window',{target:ownWindowId()}).catch(()=>{});
-}
 function applyHotkey(value:Hotkey):void {
   hotkey=value;
   if(bridge.ready)void bridge.request('set-hotkey',{hotkey}).catch(error=>console.error('Hotkey change failed',error));
@@ -99,9 +98,14 @@ function captureHotkey():Promise<CapturedKey|null> {
     bridge.request('capture-hotkey').catch(error=>{if(finishCapture===finish){finishCapture=null;clearTimeout(timer);reject(error);}});
   });
 }
-function applyEnterFinish(value:boolean):void {
-  enterFinishes=value;
-  if(bridge.ready)void bridge.request('set-enter-finish',{enabled:value}).catch(error=>console.error('Enter shortcut change failed',error));
+let sentEnterFinish:boolean|null=null;
+// Enter is intercepted only when it can still do something: a recording that has
+// not finished yet, or a recognition whose text will be inserted into a window.
+function syncEnterFinish(force=false):void {
+  const value=enterFinishes && !(lastStatus.phase==='transcribing' && !lastStatus.targeted);
+  if(!bridge.ready || (!force && value===sentEnterFinish))return;
+  sentEnterFinish=value;
+  void bridge.request('set-enter-finish',{enabled:value}).catch(error=>{sentEnterFinish=null;console.error('Enter shortcut change failed',error);});
 }
 // Placed once per appearance: following the cursor on every status update made the pill jump between monitors.
 function showOverlay():void {
@@ -167,7 +171,8 @@ function setupIpc():void {
   handle('settings:save',async value=>{
     const saved=await storage.saveSettings(value);
     if(saved.hotkey!==hotkey)applyHotkey(saved.hotkey);
-    if(saved.enterFinishes!==enterFinishes)applyEnterFinish(saved.enterFinishes);
+    restorePrevious=saved.restoreClipboard;
+    if(saved.enterFinishes!==enterFinishes){enterFinishes=saved.enterFinishes;syncEnterFinish();}
     if(app.isPackaged && !smoke) app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,args:['--hidden']});
     return saved;
   });
@@ -184,7 +189,7 @@ function setupIpc():void {
     if(generation!==deliveryGeneration)return {status:'clipboard-only',reason:'cancelled'};
     const targeted=typeof target==='string' && /^[1-9]\d*$/.test(target) && bridge.ready;
     let previous:ClipboardItem[]|null=null;
-    if(targeted && (await storage.settings().catch(()=>null))?.restoreClipboard){
+    if(targeted && restorePrevious){
       try{previous=await snapshotClipboard();}catch(error){console.error('Clipboard snapshot failed',error);}
     }
     // The paste must not be sent before the clipboard actually holds the text.
@@ -232,8 +237,9 @@ function setupIpc():void {
       deliveryGeneration++;
       if(bridge.ready)void bridge.request('cancel-insert').catch(()=>{});
     }
-    lastStatus={phase:status.phase,message:String(status.message).slice(0,250),seconds:status.seconds,level:status.level,progress:status.progress,remainingSeconds:status.remainingSeconds};
+    lastStatus={phase:status.phase,message:String(status.message).slice(0,250),seconds:status.seconds,level:status.level,progress:status.progress,targeted:status.targeted===true};
     if(changed){refreshTray();if(bridge.ready)void bridge.request('set-active',{active:dictating()}).catch(()=>{});}
+    syncEnterFinish();
     setTooltip(lastStatus.phase==='idle'?`${NAME} · ${hotkeyLabel(hotkey)}`:`${NAME} · ${lastStatus.message}`);
     if(!smoke && active() && !win.isFocused())showOverlay();
     else if(overlayShown){overlay?.hide();overlayShown=false;}
@@ -282,12 +288,13 @@ else {
       send(event as Command);
     });
     // A restarted helper starts with the default shortcut; reapply the saved one.
-    bridge.on('ready',()=>{configureNativeWindow();applyHotkey(hotkey);applyEnterFinish(enterFinishes);void bridge.request('set-active',{active:dictating()}).catch(()=>{});});
+    bridge.on('ready',()=>{applyHotkey(hotkey);syncEnterFinish(true);void bridge.request('set-active',{active:dictating()}).catch(()=>{});});
     const initial=await storage.settings().catch(()=>null);
     hotkey=initial?.hotkey ?? hotkey;
     enterFinishes=initial?.enterFinishes ?? enterFinishes;
+    restorePrevious=initial?.restoreClipboard ?? restorePrevious;
     nativeRecovery.restart();
-    await createWindows(); configureNativeWindow(); makeTray();
+    await createWindows(); makeTray();
     if(installed){
       const saved=await storage.settings();
       app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.execPath,args:['--hidden']});

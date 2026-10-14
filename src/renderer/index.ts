@@ -156,7 +156,7 @@ function setPhase(value: Phase, message?: string): void {
   renderUpdate();
   if (value !== 'recording') bars.forEach(bar => { bar.style.removeProperty('transform'); });
   syncTicker();
-  api.status({ phase, message: statusMessage, ...renderWork(), level: 0 });
+  api.status({ phase, message: statusMessage, ...renderWork(), level: 0, targeted: session?.target != null });
 }
 
 function friendlyError(error: unknown): string {
@@ -214,15 +214,18 @@ async function loadModel(token: number): Promise<void> {
 }
 
 async function recognize(pcm: Float32Array, token: number): Promise<string> {
-  // Silence never reaches the model.
-  if (!trimSilence(pcm)) return '';
+  // Silence never reaches the model: recordings without speech are skipped, and
+  // silence at the edges is cut off. A copy, because IPC would clone the whole buffer of a view.
+  const voiced = trimSilence(pcm);
+  if (!voiced) return '';
+  const audio = voiced.length === pcm.length ? pcm : voiced.slice();
   if (!modelReady) {
     setPhase('transcribing', 'Загружаем модель');
     await loadModel(token);
     if (!valid(token)) return '';
     setPhase('transcribing');
   }
-  return (await api.recognizeGigaam(pcm, false)).text;
+  return (await api.recognizeGigaam(audio, false)).text;
 }
 
 async function complete(text: string, token: number, target: string | null, enter: boolean): Promise<void> {
@@ -387,7 +390,7 @@ async function handleCommand(command: Command): Promise<void> {
       break;
     case 'finish-enter': await finish(true); break;
     // The shortcut with Shift still reaches Voice Scribe during a dictation: it simply finishes it.
-    case 'proofread': if (phase === 'starting' || phase === 'recording') { gesture.reset(); await finish(); } break;
+    case 'finish': if (phase === 'starting' || phase === 'recording') { gesture.reset(); await finish(); } break;
     case 'cancel': cancel(); break;
     case 'paste-last':
       if (!isBusy() && lastResult) {
@@ -593,7 +596,7 @@ function tick(): void {
       bars.forEach(bar => { bar.style.removeProperty('transform'); });
     }
   }
-  api.status({ phase, message: statusMessage, ...renderWork(), level });
+  api.status({ phase, message: statusMessage, ...renderWork(), level, targeted: session?.target != null });
 }
 
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) button.addEventListener('click', () => navigate(button.dataset.view!));

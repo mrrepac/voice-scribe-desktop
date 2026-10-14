@@ -14,15 +14,19 @@ export const DEFAULT_SETTINGS: Settings = {
   enterFinishes: true, enterApps: '',
 };
 export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'error';
-export interface Status { phase: Phase; message: string; seconds?: number; level?: number; progress?: number; remainingSeconds?: number; }
+export interface Status {
+  phase: Phase; message: string; seconds?: number; level?: number; progress?: number;
+  /** The dictation will be inserted into a window (not only copied to the clipboard). */
+  targeted?: boolean;
+}
 export type Command =
   | { action: 'dictation-down'; target: string }
   | { action: 'dictation-up'; heldMs: number }
   | { action: 'dictation-abort' }
   | { action: 'toggle'; target?: string }
   | { action: 'cancel' | 'finish-enter' }
-  /** The dictation shortcut plus Shift. There is no proofreading: it only finishes a running dictation. */
-  | { action: 'proofread' }
+  /** The dictation shortcut plus Shift: finishes a running dictation. */
+  | { action: 'finish' }
   | { action: 'paste-last'; target: string }
   | { action: 'bridge-error'; message: string };
 export interface Delivery { status: 'inserted' | 'clipboard-only'; reason?: string; entered?: boolean; restored?: boolean; }

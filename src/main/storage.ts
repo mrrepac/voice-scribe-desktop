@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_SETTINGS, type Settings } from '../shared/contracts';
@@ -74,6 +74,17 @@ export class Storage {
     const file = path.join(this.root, name);
     const temp = `${file}.${randomUUID()}.tmp`;
     await writeFile(temp, text, 'utf8');
-    await rename(temp, file);
+    // Antivirus and indexing services briefly lock files on Windows; retry before failing.
+    for (let attempt = 1; ; attempt++) {
+      try { await rename(temp, file); return; }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '')) {
+          await rm(temp, { force: true }).catch(() => {});
+          throw error;
+        }
+        await new Promise(resolve => setTimeout(resolve, 50 * attempt));
+      }
+    }
   }
 }

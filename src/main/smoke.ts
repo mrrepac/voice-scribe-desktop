@@ -1,6 +1,6 @@
-// Smoke tests of the real app. Bundled separately (dist/smoke-main.cjs) and loaded
-// only with --smoke-test, so ordinary starts never load this code.
-import { app, type BrowserWindow } from 'electron';
+// Smoke tests of the real app. Bundled separately (dist/smoke-main.cjs), loaded only
+// with --smoke-test from a source checkout, and left out of installers.
+import type { BrowserWindow } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { NativeBridge } from './native';
@@ -10,7 +10,7 @@ import { dictationSmokeTest } from './dictation-smoke';
 export interface SmokeContext { win: BrowserWindow; bridge: NativeBridge; }
 
 export async function runSmoke({ win, bridge }: SmokeContext): Promise<void> {
-  const out=path.join(process.cwd(),'artifacts',app.isPackaged?'packaged':'.'); await mkdir(out,{recursive:true});
+  const out=path.join(process.cwd(),'artifacts'); await mkdir(out,{recursive:true});
   const logs:string[]=[];
   win.webContents.on('console-message',({message})=>logs.push(message));
   const capture=async(name:string)=>writeFile(path.join(out,name),(await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true})).toPNG());

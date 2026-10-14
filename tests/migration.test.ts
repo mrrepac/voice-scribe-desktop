@@ -46,3 +46,33 @@ test('without Lite the full app settings are kept', async () => {
     assert.equal(settings.sounds, false);
   } finally { await rm(base, { recursive: true, force: true }); }
 });
+
+test('full app leftovers are removed only on the first start', async () => {
+  const base = await mkdtemp(path.resolve('.test-build/migration-'));
+  try {
+    const userData = path.join(base, 'Voice Scribe');
+    await mkdir(path.join(userData, 'models'), { recursive: true });
+    const storage = new Storage(userData);
+    await migrateFromOlderApps(userData, base, storage);
+    assert.equal(existsSync(path.join(userData, 'models')), false);
+    await mkdir(path.join(userData, 'models'), { recursive: true });
+    await migrateFromOlderApps(userData, base, storage);
+    assert.equal(existsSync(path.join(userData, 'models')), true, 'later folders are left alone');
+  } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test('corrupt Lite settings are skipped once and not retried', async () => {
+  const base = await mkdtemp(path.resolve('.test-build/migration-'));
+  try {
+    const userData = path.join(base, 'Voice Scribe'), lite = path.join(base, 'Voice Scribe Lite');
+    await mkdir(path.join(lite, 'models'), { recursive: true });
+    await mkdir(userData, { recursive: true });
+    await writeFile(path.join(userData, 'settings.json'), JSON.stringify({ hotkey: 'win-alt' }));
+    await writeFile(path.join(lite, 'settings.json'), '{"hotkey":');
+    const storage = new Storage(userData);
+    await migrateFromOlderApps(userData, base, storage);
+    assert.equal((await storage.settings()).hotkey, 'win-alt', 'own settings are kept');
+    assert.equal(existsSync(path.join(userData, 'lite-imported')), true);
+    assert.equal(existsSync(path.join(lite, 'models')), false);
+  } finally { await rm(base, { recursive: true, force: true }); }
+});

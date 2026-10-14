@@ -19,9 +19,8 @@ rejection of a nonexistent window; it does not send keys or change the clipboard
 ## JSON lines protocol, version 1
 
 All messages are UTF-8 JSON, one object per line. Requests use an `id` which is
-echoed in responses. stdout contains protocol JSON only. Send `get-target` before
-starting microphone capture from a nonactivating overlay. A normal settings
-window takes focus, so recording via a global shortcut is the preferred workflow.
+echoed in responses. stdout contains protocol JSON only. `get-target` returns the
+current foreground HWND; tests use it to check the live helper.
 
 Events:
 
@@ -31,7 +30,7 @@ Events:
 {"event":"hotkey","action":"dictation-up","heldMs":501}
 {"event":"hotkey","action":"dictation-abort"}
 {"event":"hotkey","action":"cancel","target":"123456"}
-{"event":"hotkey","action":"proofread","target":"123456"}
+{"event":"hotkey","action":"finish","target":"123456"}
 {"event":"hotkey","action":"paste-last","target":"123456"}
 ```
 
@@ -40,12 +39,13 @@ Events:
   down, leaves recording running for a release before 350 ms, and stops on a hold
   release at or after 350 ms. Pressing again while recording stops it.
 - Escape emits `cancel` only while `active` is true and no modifiers are held.
-- Ctrl+Shift+Space emits `proofread` in Scribe, or during an active session in another
-  window. Outside Scribe while idle it passes through. The parent selects the review
-  or plain mode using the event's foreground HWND. Bare Enter always passes through.
+- Ctrl+Shift+Space (the dictation shortcut plus Shift) emits `finish` while `active`
+  is true; while idle it passes through.
+- Bare Enter emits `finish-enter` while `active` and `set-enter-finish` are both
+  true; otherwise it passes through.
 - `set-hotkey` with `hotkey` selects the dictation shortcut: `ctrl-space` (default),
   `ctrl-alt-space` or `win-alt` (left Win + left Alt). Proofreading is the same
-  shortcut plus Shift; shortcuts of unselected presets pass through. Releasing any
+  Finishing is the same shortcut plus Shift; shortcuts of unselected presets pass through. Releasing any
   key of the shortcut ends a hold. The `win-alt` chord never swallows Win or Alt;
   when it fires, an unassigned key (0xE8) is injected so their release does not
   open Start or an application menu. A third non-Shift/Ctrl key pressed while the
@@ -59,7 +59,6 @@ Events:
   and its release, as `{"event":"hotkey-captured","key":120,"ctrl":false,"alt":false,"shift":false,"win":false}`.
   This is the only case where an ordinary key leaves the helper, and only on this
   explicit request. `cancel-capture` stops waiting.
-- `set-scribe-window` with `target` registers the main Scribe HWND with the router.
 - Ctrl+Alt+V emits `paste-last` with the current foreground HWND.
 - Injected keyboard events are ignored; only recognized shortcuts are emitted.
 

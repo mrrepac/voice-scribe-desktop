@@ -13,7 +13,6 @@ function pickMime(): string {
   }
   return "";
 }
-export function mimeToExt(mime: string): string { return mime.includes("mp4") ? "m4a" : "webm"; }
 
 export class Recorder {
   state: RecorderState = "idle";

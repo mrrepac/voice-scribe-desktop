@@ -1,14 +1,16 @@
 import { build } from 'esbuild';
-import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 // Electron 44 does not download its runtime during npm install. This official
 // installer is idempotent and verifies the runtime matches the package version.
 execFileSync(process.execPath, ['node_modules/electron/install.js'], { stdio: 'inherit', windowsHide: true });
+// A fresh dist: files left by older builds would otherwise end up in the installer.
+await rm('dist', { recursive: true, force: true });
 await mkdir('dist', { recursive: true });
 await build({entryPoints:['src/main/index.ts'],outfile:'dist/main.cjs',platform:'node',format:'cjs',bundle:true,external:['electron','electron-updater'],target:'node22'});
-// Smoke tests are loaded only with --smoke-test; packaged builds keep them for release checks.
+// Smoke tests are loaded only with --smoke-test from a source checkout; installers leave them out.
 await build({entryPoints:['src/main/smoke.ts'],outfile:'dist/smoke-main.cjs',platform:'node',format:'cjs',bundle:true,external:['electron','electron-updater'],target:'node22'});
 await build({entryPoints:['src/main/gigaam-worker.ts'],outfile:'dist/gigaam-worker.cjs',platform:'node',format:'cjs',bundle:true,external:['sherpa-onnx-node'],target:'node22'});
 await build({entryPoints:['src/main/preload.ts'],outfile:'dist/preload.cjs',platform:'node',format:'cjs',bundle:true,external:['electron'],target:'node22'});
