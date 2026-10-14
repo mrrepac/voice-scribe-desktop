@@ -17,7 +17,6 @@ const api: ScribeAPI = {
   status:value=>ipcRenderer.send('status',value),
   hide:()=>ipcRenderer.send('hide'),
   onCommand:handler=>{const fn=(_:unknown,cmd:Command)=>handler(cmd);ipcRenderer.on('command',fn);return()=>ipcRenderer.removeListener('command',fn);},
-  windowProcess:target=>ipcRenderer.invoke('window:process',target),
   getAppInfo:()=>ipcRenderer.invoke('app:info'),
   captureHotkey:()=>ipcRenderer.invoke('hotkey:capture'),
   cancelHotkeyCapture:()=>ipcRenderer.invoke('hotkey:cancel-capture'),

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, shell, Tray, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, shell, Tray, type WebContents } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -38,8 +38,6 @@ let deliveryQueue:Promise<unknown>=Promise.resolve();
 let deliveryGeneration=0;
 let lastStatus:Status={phase:'idle',message:'Готов к диктовке'};
 let hotkey:Hotkey='ctrl-space';
-let enterFinishes=true;
-let restorePrevious=false;
 let overlayShown=false;
 const bridge=new NativeBridge();
 const nativeRecovery=new NativeRecovery(bridge,app.isPackaged?path.join(process.resourcesPath,'native/VoiceScribe.Native.exe'):path.join(root,'native/bin/VoiceScribe.Native.exe'),state=>{
@@ -99,10 +97,11 @@ function captureHotkey():Promise<CapturedKey|null> {
   });
 }
 let sentEnterFinish:boolean|null=null;
-// Enter is intercepted only when it can still do something: a recording that has
-// not finished yet, or a recognition whose text will be inserted into a window.
+// Bare Enter during a dictation finishes it and sends the text. It is intercepted only
+// when it can still do something: a recording that has not finished yet, or a
+// recognition whose text will be inserted into a window.
 function syncEnterFinish(force=false):void {
-  const value=enterFinishes && !(lastStatus.phase==='transcribing' && !lastStatus.targeted);
+  const value=!(lastStatus.phase==='transcribing' && !lastStatus.targeted);
   if(!bridge.ready || (!force && value===sentEnterFinish))return;
   sentEnterFinish=value;
   void bridge.request('set-enter-finish',{enabled:value}).catch(error=>{sentEnterFinish=null;console.error('Enter shortcut change failed',error);});
@@ -135,24 +134,6 @@ function handle(name:string,fn:(...args:any[])=>unknown):void {
     return fn(...args);
   });
 }
-// Copies every format the clipboard offers (including raw Windows formats such as
-// copied files) so it can be put back after insertion. OLE bookkeeping formats
-// only point at the previous owner's live object and must not be replayed.
-async function snapshotClipboard():Promise<ClipboardItem[]> {
-  const items:ClipboardItem[]=[];
-  for(const item of await clipboard.read()){
-    const data:Record<string,Blob>={};
-    for(const type of item.types)if(!/"(DataObject|Ole Private Data)"/.test(type)){
-      const value=await item.getType(type);
-      if(value instanceof Blob)data[type]=value;
-    }
-    if(Object.keys(data).length)items.push(new ClipboardItem(data));
-  }
-  return items;
-}
-async function restoreClipboard(previous:ClipboardItem[]):Promise<void> {
-  if(previous.length)await clipboard.write(previous);else clipboard.clear();
-}
 async function appResponse(request:Request):Promise<Response> {
   const url=new URL(request.url);
   if(url.host!=='app')return new Response('Not found',{status:404});
@@ -171,8 +152,6 @@ function setupIpc():void {
   handle('settings:save',async value=>{
     const saved=await storage.saveSettings(value);
     if(saved.hotkey!==hotkey)applyHotkey(saved.hotkey);
-    restorePrevious=saved.restoreClipboard;
-    if(saved.enterFinishes!==enterFinishes){enterFinishes=saved.enterFinishes;syncEnterFinish();}
     if(app.isPackaged && !smoke) app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,args:['--hidden']});
     return saved;
   });
@@ -188,29 +167,14 @@ function setupIpc():void {
     const run=deliveryQueue.then(async()=>{
     if(generation!==deliveryGeneration)return {status:'clipboard-only',reason:'cancelled'};
     const targeted=typeof target==='string' && /^[1-9]\d*$/.test(target) && bridge.ready;
-    let previous:ClipboardItem[]|null=null;
-    if(targeted && restorePrevious){
-      try{previous=await snapshotClipboard();}catch(error){console.error('Clipboard snapshot failed',error);}
-    }
     // The paste must not be sent before the clipboard actually holds the text.
     await clipboard.writeText(value);
     if(!targeted) return {status:'clipboard-only',reason:'no-target'};
     // Never paste into this application's own window.
     if(target===ownWindowId()) return {status:'clipboard-only',reason:'own-window'};
-    let result;
-    try { result=await bridge.request('insert',{target,enter:enter===true}); }
-    catch(error) { return {status:'clipboard-only',reason:(error as Error).message}; }
     // Failed insertion keeps the text in the clipboard for a manual Ctrl+V.
-    if(previous && result?.status==='inserted'){
-      // Some applications read the clipboard lazily after Ctrl+V; give them time first.
-      await new Promise(resolve=>setTimeout(resolve,500));
-      // Something newer was copied in the meantime: leave it alone.
-      if(await clipboard.readText().catch(()=>'')===value){
-        try{await restoreClipboard(previous);result={...result,restored:true};}
-        catch(error){console.error('Clipboard restore failed',error);}
-      }
-    }
-    return result;
+    try { return await bridge.request('insert',{target,enter:enter===true}); }
+    catch(error) { return {status:'clipboard-only',reason:(error as Error).message}; }
     });
     deliveryQueue=run.catch(()=>{});
     return run;
@@ -219,11 +183,6 @@ function setupIpc():void {
   handle('gigaam:prepare',()=>gigaam.prepare(gigaamProgress));
   handle('gigaam:recognize',(pcm,timed)=>gigaam.recognize(pcm,timed===true,gigaamProgress));
   handle('gigaam:cancel',()=>gigaam.cancel());
-  handle('window:process',async target=>{
-    if(typeof target!=='string' || !bridge.ready)return null;
-    try{const info=await bridge.request('window-info',{target});return typeof info?.process==='string'?info.process:null;}
-    catch{return null;}
-  });
   handle('app:info',()=>({version:app.getVersion(),dataPath:storage.root,nativeReady:bridge.ready,modelBundled}));
   handle('hotkey:capture',captureHotkey);
   handle('hotkey:cancel-capture',()=>finishCapture?.(null));
@@ -291,8 +250,6 @@ else {
     bridge.on('ready',()=>{applyHotkey(hotkey);syncEnterFinish(true);void bridge.request('set-active',{active:dictating()}).catch(()=>{});});
     const initial=await storage.settings().catch(()=>null);
     hotkey=initial?.hotkey ?? hotkey;
-    enterFinishes=initial?.enterFinishes ?? enterFinishes;
-    restorePrevious=initial?.restoreClipboard ?? restorePrevious;
     nativeRecovery.restart();
     await createWindows(); makeTray();
     if(installed){

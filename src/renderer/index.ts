@@ -1,11 +1,10 @@
 import { Recorder } from '../asr/recorder';
 import { DEFAULT_SETTINGS, type Settings, type Phase, type Command } from '../shared/contracts';
-import { applyVoiceCommands, applyReplacements, parseReplacements, trimSilence } from '../shared/clean';
+import { trimSilence } from '../shared/clean';
 import { DictationGesture } from './gesture';
 import { deliveryMessage } from './delivery-message';
 import type { UpdateState } from '../shared/updates';
 import { capturedHotkey, hotkeyLabel, isHotkey } from '../shared/hotkeys';
-import { normalizeApp, parseApps } from '../shared/apps';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -59,7 +58,7 @@ let cueContext: AudioContext | null = null;
 let lastSeconds = 0;
 let workStarted = 0;
 let downloadPercent: number | undefined;
-// Startup warmup only loads the model; dictation may start and queue behind it.
+// "Подготовить модель" (source checkouts only) loads the model; dictation may start and queue behind it.
 let warming = false;
 /** GigaAM is loaded in its process; cancelling recognition kills that process and unloads it. */
 let modelReady = false;
@@ -132,7 +131,7 @@ function setPhase(value: Phase, message?: string): void {
   const descriptions: Record<Phase, string> = {
     idle: `${hotkeyLabel(settings.hotkey)} — запись в любом приложении`,
     starting: 'Разрешите приложению использовать микрофон, если Windows спросит.',
-    recording: session?.target ? `Текст вставится в выбранное поле${session.enter ? ' и будет нажат Enter' : ''}.${settings.enterFinishes ? ' Enter — завершить и отправить.' : ''}` : '',
+    recording: session?.target ? `Текст вставится в выбранное поле${session.enter ? ' и будет нажат Enter' : ''}. Enter — завершить и отправить.` : '',
     transcribing: '',
     preparing: warming ? 'Диктовку можно начать сразу: распознавание дождётся модели.' : 'Первая загрузка может занять несколько минут.',
     error: message ?? 'Проверьте настройки и начните снова.',
@@ -179,10 +178,6 @@ function fail(error: unknown, token: number): void {
   const message = friendlyError(error);
   setPhase('error', message);
   toast(message, true);
-}
-
-function processText(text: string, options: Settings): string {
-  return applyReplacements(options.voiceCommands ? applyVoiceCommands(text) : text, parseReplacements(options.replacements)).trim();
 }
 
 function syncResultActions(): void {
@@ -288,17 +283,6 @@ async function start(target: string | null): Promise<void> {
   lastSeconds = 0;
   $('timer').textContent = '00:00';
   setPhase('starting');
-  if (target) {
-    const lookup = api.windowProcess(target).catch(() => null);
-    void lookup.then(rememberApp);
-    const apps = parseApps(active.settings.enterApps);
-    if (apps.length) {
-      // A stuck helper must not delay the recording: give up after 300 ms.
-      const process = await Promise.race([lookup, new Promise<null>(resolve => setTimeout(() => resolve(null), 300))]);
-      if (!valid(token)) return;
-      if (process && apps.includes(normalizeApp(process))) active.enter = true;
-    }
-  }
   // Load the model while the user speaks. Errors resurface from recognition.
   void loadModel(token).catch(() => {});
   try {
@@ -333,7 +317,7 @@ async function finish(enter = false): Promise<void> {
       audio = await decodeAudioTo16kMono(await recording.blob.arrayBuffer());
       if (!valid(token)) return;
     }
-    const text = audio ? processText(await recognize(audio, token), active.settings) : '';
+    const text = audio ? (await recognize(audio, token)).trim() : '';
     await complete(text, token, active.target, active.enter);
   } catch (error) { fail(error, token); }
 }
@@ -359,7 +343,7 @@ async function prepare(): Promise<void> {
   setPhase('preparing');
   try {
     await loadModel(token);
-    // A dictation started during warmup supersedes the token, but the model is still ready.
+    // A dictation started while preparing supersedes the token, but the model is still ready.
     if (!valid(token)) return;
     setPhase('idle', 'Модель готова');
     toast(`Модель готова. Поставьте курсор в любом приложении и нажмите ${hotkeyLabel(settings.hotkey)}.`);
@@ -411,20 +395,6 @@ function navigate(view: string): void {
   if (view === 'settings') void refreshMicrophones();
   $('view-' + view).scrollTop = 0;
   window.scrollTo(0, 0);
-}
-
-/** The last program dictated into, offered for the Enter list. */
-let recentApp = '';
-function rememberApp(process: string | null): void {
-  const app = process ? normalizeApp(process) : '';
-  if (!app || app === 'voice scribe.exe') return;
-  recentApp = app;
-  renderRecentApp();
-}
-function renderRecentApp(): void {
-  const listed = parseApps(settings.enterApps).includes(recentApp);
-  $('recent-app').hidden = !recentApp || listed;
-  $('recent-app-add').textContent = `Добавить ${recentApp}`;
 }
 
 function renderHotkeyLabels(): void {
@@ -482,7 +452,6 @@ function applySettings(): void {
     else control.value = String(value);
   }
   renderHotkeyLabels();
-  renderRecentApp();
 }
 
 function queueSettingsSave(): void {
@@ -496,7 +465,6 @@ function queueSettingsSave(): void {
   }
   settings = next;
   renderHotkeyLabels();
-  renderRecentApp();
   if (phase === 'idle') $('record-description').textContent = `${hotkeyLabel(settings.hotkey)} — запись в любом приложении`;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSettingsSave, 300);
@@ -620,12 +588,6 @@ const unsubscribeNative = api.onNativeHealth(renderNativeHealth);
 void api.getNativeHealth().then(renderNativeHealth).catch(() => {});
 form.addEventListener('submit', event => event.preventDefault());
 form.addEventListener('change', queueSettingsSave);
-for (const name of ['replacements', 'enterApps']) form.querySelector(`[name="${name}"]`)?.addEventListener('input', queueSettingsSave);
-$('recent-app-add').addEventListener('click', () => {
-  const field = form.querySelector<HTMLTextAreaElement>('[name="enterApps"]')!;
-  field.value = [...parseApps(field.value), recentApp].join('\n');
-  queueSettingsSave();
-});
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && isBusy()) { event.preventDefault(); cancel(); } });
 navigator.mediaDevices?.addEventListener('devicechange', () => void refreshMicrophones());
 const unsubscribe = api.onCommand(command => { void handleCommand(command); });
@@ -665,6 +627,5 @@ async function boot(): Promise<void> {
   const queued = pendingCommands;
   pendingCommands = [];
   for (const command of queued) void handleCommand(command);
-  if (settings.warmup && !isBusy()) void prepare();
 }
 void boot().catch(error => { initialized = true; setPhase('error', friendlyError(error)); });

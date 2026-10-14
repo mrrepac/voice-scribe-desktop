@@ -15,7 +15,7 @@ test('full app leftovers are removed and Lite settings are imported once', async
     await mkdir(path.join(lite, 'models', 'gigaam-v3-punct'), { recursive: true });
     await writeFile(path.join(userData, 'history.json'), '[]');
     await writeFile(path.join(userData, 'settings.json'), JSON.stringify({ hotkey: 'win-alt', llmEnabled: true }));
-    await writeFile(path.join(lite, 'settings.json'), JSON.stringify({ hotkey: 'key:120', enterApps: 'telegram.exe' }));
+    await writeFile(path.join(lite, 'settings.json'), JSON.stringify({ hotkey: 'key:120', sounds: false }));
     const storage = new Storage(userData);
     await migrateFromOlderApps(userData, base, storage);
     assert.equal(existsSync(path.join(userData, 'models')), false);
@@ -24,7 +24,7 @@ test('full app leftovers are removed and Lite settings are imported once', async
     assert.equal(existsSync(path.join(lite, 'models')), false, 'Lite model removed');
     let settings = await storage.settings();
     assert.equal(settings.hotkey, 'key:120');
-    assert.equal(settings.enterApps, 'telegram.exe');
+    assert.equal(settings.sounds, false);
 
     await storage.saveSettings({ ...settings, hotkey: 'insert' });
     await migrateFromOlderApps(userData, base, storage);

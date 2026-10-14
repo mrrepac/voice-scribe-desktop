@@ -7,8 +7,8 @@ import { isHotkey } from '../shared/hotkeys';
 export function validateSettings(raw: unknown): Settings {
   const v = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const s = {...DEFAULT_SETTINGS};
-  for (const k of ['microphone','replacements','enterApps'] as const) if (typeof v[k] === 'string') s[k] = v[k].slice(0, k === 'replacements' ? 50000 : k === 'enterApps' ? 5000 : 300);
-  for (const k of ['voiceCommands','sounds','warmup','startAtLogin','restoreClipboard','enterFinishes'] as const) if (typeof v[k] === 'boolean') s[k] = v[k];
+  if (typeof v.microphone === 'string') s.microphone = v.microphone.slice(0, 300);
+  for (const k of ['sounds','startAtLogin'] as const) if (typeof v[k] === 'boolean') s[k] = v[k];
   if (typeof v.silenceSeconds === 'number' && Number.isFinite(v.silenceSeconds)) s.silenceSeconds = v.silenceSeconds === 0 ? 0 : Math.min(8, Math.max(2,v.silenceSeconds));
   if (isHotkey(v.hotkey)) s.hotkey = v.hotkey;
   return s;

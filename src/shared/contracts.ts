@@ -1,17 +1,10 @@
 import type { Hotkey } from './hotkeys';
 export interface Settings {
-  microphone: string; voiceCommands: boolean; replacements: string;
-  silenceSeconds: number; sounds: boolean; warmup: boolean;
-  startAtLogin: boolean; hotkey: Hotkey; restoreClipboard: boolean;
-  /** Bare Enter during a dictation finishes it and sends the text with Enter. */
-  enterFinishes: boolean;
-  /** Programs (one executable per line) where Enter is always pressed after insertion. */
-  enterApps: string;
+  microphone: string; silenceSeconds: number; sounds: boolean;
+  startAtLogin: boolean; hotkey: Hotkey;
 }
 export const DEFAULT_SETTINGS: Settings = {
-  microphone: '', voiceCommands: false, replacements: '', silenceSeconds: 0,
-  sounds: true, warmup: false, startAtLogin: false, hotkey: 'ctrl-space', restoreClipboard: false,
-  enterFinishes: true, enterApps: '',
+  microphone: '', silenceSeconds: 0, sounds: true, startAtLogin: false, hotkey: 'ctrl-space',
 };
 export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'error';
 export interface Status {
@@ -29,7 +22,7 @@ export type Command =
   | { action: 'finish' }
   | { action: 'paste-last'; target: string }
   | { action: 'bridge-error'; message: string };
-export interface Delivery { status: 'inserted' | 'clipboard-only'; reason?: string; entered?: boolean; restored?: boolean; }
+export interface Delivery { status: 'inserted' | 'clipboard-only'; reason?: string; entered?: boolean; }
 export interface ScribeAPI {
   getUpdateState(): Promise<import('./updates').UpdateState>;
   checkForUpdates(): Promise<import('./updates').UpdateState>;
@@ -47,8 +40,6 @@ export interface ScribeAPI {
   status(value: Status): void;
   hide(): void;
   onCommand(handler: (command: Command) => void): () => void;
-  /** Executable of the window a dictation targets; null when unknown. */
-  windowProcess(target: string): Promise<string | null>;
   getAppInfo(): Promise<{version: string; dataPath: string; nativeReady: boolean; modelBundled: boolean}>;
   /** Records the next key press system-wide; null when cancelled with Esc or timed out. */
   captureHotkey(): Promise<import('./hotkeys').CapturedKey | null>;
