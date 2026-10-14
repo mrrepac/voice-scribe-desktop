@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, shell, Tray, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, Tray, type WebContents } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -124,7 +124,6 @@ function refreshTray():void {
     {label:['starting','recording'].includes(lastStatus.phase) ? 'Остановить диктовку' : 'Записать в буфер',enabled:lastStatus.phase!=='transcribing',click:()=>send({action:'toggle'})},
     {label:'Отменить',enabled:active(),click:()=>send({action:'cancel'})},
     {type:'separator'},
-    {label:'Открыть папку журналов',click:()=>void shell.openPath(log.directory)},
     {label:'Выход',click:()=>{quitting=true;app.quit();}},
   ]));
 }
