@@ -1,7 +1,7 @@
 {
   "name": "voice-scribe-desktop",
   "productName": "Voice Scribe",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Лёгкая локальная диктовка GigaAM v3 в любое приложение Windows",
   "author": "mrrepac",
   "license": "MIT",
