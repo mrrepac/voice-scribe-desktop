@@ -7,8 +7,8 @@ type Updater = Pick<AppUpdater, 'on' | 'autoDownload' | 'autoInstallOnAppQuit' |
 export class UpdateService {
   state: UpdateState;
   constructor(private updater: Updater, supported: boolean, private busy: () => boolean, private publish: (state: UpdateState) => void) {
-    this.state = supported ? { phase: 'idle', message: 'Обновления проверяются автоматически.' }
-      : { phase: 'unsupported', message: 'Для автообновлений установите Voice Scribe через установщик Setup.' };
+    this.state = supported ? { phase: 'idle', message: 'Обновляется автоматически.' }
+      : { phase: 'unsupported', message: 'Автообновление работает только в установленной версии.' };
     updater.autoDownload = false;
     updater.autoInstallOnAppQuit = false;
     if (!supported) return;

@@ -54,68 +54,45 @@
       </div>
     </section>
     <section id="view-settings" class="view" aria-label="Настройки" hidden>
-      <div class="settings-header"><span class="saved-label" id="settings-saved" role="status" aria-live="polite" aria-atomic="true">Сохраняются автоматически</span></div>
-      <p id="settings-busy" class="inline-notice" hidden>Настройки можно изменить после завершения записи или распознавания.</p>
+      <p id="settings-busy" class="inline-notice" hidden>Настройки можно изменить после записи.</p>
       <form id="settings-form">
         <fieldset id="settings-fieldset">
           <div class="settings-group">
-            <div class="group-heading"><h2>Микрофон и диктовка</h2></div>
-            <div class="settings-grid">
-              <label class="field">Микрофон
-                <select name="microphone" id="microphone-select"><option value="">Системный по умолчанию</option></select>
-                <button type="button" class="text-button field-action" id="refresh-mics">Обновить список</button>
-              </label>
-              <label class="field">Останавливать после тишины
-                <select name="silenceSeconds"><option value="0">Только вручную</option><option value="2">2 секунды</option><option value="3">3 секунды</option><option value="5">5 секунд</option><option value="8">8 секунд</option></select>
-                <small>Запись без речи отменяется через 15 секунд, запись длиннее часа завершается автоматически.</small>
-              </label>
-              <label class="field">Сочетание для диктовки
-                <select name="hotkey"><option value="ctrl-space">Ctrl + Space</option><option value="ctrl-alt-space">Ctrl + Alt + Space</option><option value="win-alt">Левые Win + Alt</option><option value="insert">Insert</option><option value="capture">Своя клавиша…</option></select>
-                <small id="hotkey-hint">Ctrl + Space занят автодополнением в VS Code и JetBrains. Insert перестаёт переключать режим замены; Shift + Insert и Ctrl + Insert работают как раньше.</small>
-              </label>
-            </div>
-            <div class="toggle-row"><div><strong>Голосовые знаки препинания</strong><p>Говорите «запятая», «точка», «новая строка», «новый абзац».</p></div><label class="switch"><input type="checkbox" name="voiceCommands" aria-label="Голосовые знаки препинания"><span></span></label></div>
-            <div class="toggle-row"><div><strong>Возвращать прежнее содержимое буфера</strong><p>После автовставки в буфер обмена вернётся то, что было скопировано до диктовки. Медленные приложения могут не успеть прочитать текст — тогда вставьте его через Ctrl + Alt + V.</p></div><label class="switch"><input type="checkbox" name="restoreClipboard" aria-label="Возвращать прежнее содержимое буфера"><span></span></label></div>
-            <div class="toggle-row"><div><strong>Звуковые сигналы</strong><p>Короткий звук в начале записи и после готового результата.</p></div><label class="switch"><input type="checkbox" name="sounds" aria-label="Звуковые сигналы"><span></span></label></div>
-            <div class="toggle-row"><div><strong>Готовить модель при запуске</strong><p>Первый результат будет быстрее. Использует память компьютера.</p></div><label class="switch"><input type="checkbox" name="warmup" aria-label="Готовить модель при запуске"><span></span></label></div>
+            <h2>Диктовка</h2>
+            <label class="row">Микрофон<select name="microphone" id="microphone-select"><option value="">Системный по умолчанию</option></select></label>
+            <label class="row">Сочетание<select name="hotkey"><option value="ctrl-space">Ctrl + Space</option><option value="ctrl-alt-space">Ctrl + Alt + Space</option><option value="win-alt">Левые Win + Alt</option><option value="insert">Insert</option><option value="capture">Своя клавиша…</option></select></label>
+            <p class="row-hint" id="hotkey-hint" role="status"></p>
+            <label class="row">Остановка после тишины<select name="silenceSeconds"><option value="0">Выключена</option><option value="2">2 секунды</option><option value="3">3 секунды</option><option value="5">5 секунд</option><option value="8">8 секунд</option></select></label>
+            <label class="row"><span>Голосовая пунктуация<small>«запятая», «точка», «новая строка»</small></span><span class="switch"><input type="checkbox" name="voiceCommands"><span></span></span></label>
+            <label class="row">Звуки начала и конца записи<span class="switch"><input type="checkbox" name="sounds"><span></span></span></label>
+            <label class="row">Загружать модель при запуске<span class="switch"><input type="checkbox" name="warmup"><span></span></span></label>
           </div>
           <div class="settings-group">
-            <div class="group-heading"><h2>Отправка через Enter</h2></div>
-            <div class="toggle-row"><div><strong>Enter во время записи — завершить и отправить</strong><p>Нажмите Enter вместо сочетания диктовки: текст вставится, и следом будет нажат Enter. Во время записи Enter не попадает в приложение.</p></div><label class="switch"><input type="checkbox" name="enterFinishes" aria-label="Enter во время записи завершает её и отправляет текст"><span></span></label></div>
-            <label class="field">Всегда нажимать Enter после вставки в программах<textarea name="enterApps" rows="3" spellcheck="false" placeholder="telegram.exe&#10;slack.exe"></textarea><small>Одна программа на строку. Программа определяется по окну, в котором начата запись.</small></label>
-            <p class="settings-footnote" id="recent-app" hidden><span id="recent-app-name"></span> <button type="button" class="text-button" id="recent-app-add">Добавить</button></p>
+            <h2>Вставка</h2>
+            <label class="row">Возвращать прежний буфер обмена<span class="switch"><input type="checkbox" name="restoreClipboard"><span></span></span></label>
+            <label class="row">Enter во время записи — вставить и отправить<span class="switch"><input type="checkbox" name="enterFinishes"><span></span></span></label>
+            <label class="field">Всегда нажимать Enter после вставки в<textarea name="enterApps" rows="2" spellcheck="false" placeholder="telegram.exe&#10;slack.exe"></textarea></label>
+            <p class="row-hint" id="recent-app" hidden><button type="button" class="text-button" id="recent-app-add"></button></p>
           </div>
           <div class="settings-group">
-            <div class="group-heading"><h2>Ваш словарь</h2></div>
-            <label class="field">Одна замена на строку<textarea name="replacements" rows="5" placeholder="обсидиан = Obsidian&#10;войс скрайб = Voice Scribe&#10;спб = Санкт-Петербург"></textarea><small>Слева: как распознаётся. Справа: как нужно написать. Пустая правая часть удаляет слово.</small></label>
+            <h2>Словарь замен</h2>
+            <label class="field"><span class="visually-hidden">Словарь замен, одна замена на строку</span><textarea name="replacements" rows="4" spellcheck="false" placeholder="обсидиан = Obsidian&#10;спб = Санкт-Петербург&#10;э-э ="></textarea></label>
           </div>
           <div class="settings-group">
-            <div class="group-heading"><h2>Приложение</h2></div>
-            <p id="native-health" class="inline-notice" role="status">Подключаем горячие клавиши…</p>
-            <button type="button" class="text-button" id="native-restart">Подключить заново</button>
-            <div class="toggle-row"><div><strong>Запускать вместе с Windows</strong><p>Voice Scribe появится в системном трее.</p></div><label class="switch"><input type="checkbox" name="startAtLogin" aria-label="Запускать вместе с Windows"><span></span></label></div>
-            <div class="settings-footnote"><span id="model-note">Модель GigaAM v3 входит в программу: распознавание работает на этом компьютере без интернета.</span><p id="data-path"></p><small id="version">Voice Scribe Lite</small></div>
+            <h2>Программа</h2>
+            <label class="row">Запускать вместе с Windows<span class="switch"><input type="checkbox" name="startAtLogin"><span></span></span></label>
+            <div class="row" id="native-problem" hidden><span id="native-health" role="status"></span><button type="button" class="button button-small" id="native-restart">Подключить заново</button></div>
+            <div class="row"><span><span id="version">Voice Scribe</span><small id="update-status" role="status"></small></span><button id="update-check" class="button button-small" type="button">Проверить обновления</button></div>
           </div>
         </fieldset>
       </form>
-      <section class="settings-group" aria-label="Обновления">
-        <div class="group-heading"><h2>Обновления</h2></div>
-        <p id="update-status" class="inline-notice" role="status">Проверяем доступность обновлений…</p>
-        <div class="actions">
-          <button id="update-check" class="button" type="button">Проверить обновления</button>
-          <button id="update-download" class="button" type="button" hidden>Скачать обновление</button>
-          <button id="update-install" class="button" type="button" hidden>Перезапустить и обновить</button>
-        </div>
-        <p class="settings-footnote">Новые версии загружаются в фоне. Установка — по вашей команде, после завершения записи. Настройки сохраняются.</p>
-      </section>
       <details class="keyboard-note">
         <summary>Сочетания клавиш <svg aria-hidden="true"><use href="#i-chevron-down"/></svg></summary>
         <dl class="shortcut-list">
-          <div><dt><kbd data-hotkey="main">Ctrl + Space</kbd></dt><dd>Начать или завершить запись.</dd></div>
-          <div><dt>Удерживайте <kbd data-hotkey="main">Ctrl + Space</kbd></dt><dd>Диктуйте короткую фразу. Отпустите клавиши, чтобы завершить запись.</dd></div>
-          <div><dt><kbd>Enter</kbd> во время записи</dt><dd>Завершить запись, вставить текст и нажать Enter (если включено).</dd></div>
-          <div><dt><kbd>Ctrl + Alt + V</kbd></dt><dd>Вставить последний текст в текущее окно.</dd></div>
-          <div><dt><kbd>Esc</kbd></dt><dd>Отменить запись или распознавание.</dd></div>
+          <div><dt><kbd data-hotkey="main">Ctrl + Space</kbd></dt><dd>Начать или завершить запись. Удерживайте, чтобы записывать до отпускания.</dd></div>
+          <div><dt><kbd>Enter</kbd></dt><dd>Во время записи: вставить текст и отправить.</dd></div>
+          <div><dt><kbd>Ctrl + Alt + V</kbd></dt><dd>Вставить последний текст.</dd></div>
+          <div><dt><kbd>Esc</kbd></dt><dd>Отменить запись.</dd></div>
         </dl>
       </details>
     </section>

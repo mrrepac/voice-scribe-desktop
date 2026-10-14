@@ -81,9 +81,6 @@ function renderUpdate(state = updateState): void {
   const ready = state.phase === 'ready';
   const available = state.phase === 'available';
   $<HTMLButtonElement>('update-check').disabled = ['unsupported', 'checking', 'downloading', 'ready'].includes(state.phase);
-  $('update-download').hidden = !available;
-  $('update-install').hidden = !ready;
-  $<HTMLButtonElement>('update-install').disabled = isBusy() || installingUpdate;
   $('update-notice').hidden = !(available || downloading || ready);
   $('update-notice-text').textContent = ready && isBusy() ? `Версия ${state.version} готова. Обновить можно после завершения записи.` : state.message;
   const action = $<HTMLButtonElement>('update-notice-action');
@@ -427,7 +424,7 @@ function rememberApp(process: string | null): void {
 function renderRecentApp(): void {
   const listed = parseApps(settings.enterApps).includes(recentApp);
   $('recent-app').hidden = !recentApp || listed;
-  $('recent-app-name').textContent = `Последняя программа: ${recentApp}`;
+  $('recent-app-add').textContent = `Добавить ${recentApp}`;
 }
 
 function renderHotkeyLabels(): void {
@@ -501,7 +498,6 @@ function queueSettingsSave(): void {
   renderHotkeyLabels();
   renderRecentApp();
   if (phase === 'idle') $('record-description').textContent = `${hotkeyLabel(settings.hotkey)} — запись в любом приложении`;
-  $('settings-saved').textContent = 'Сохраняем…';
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSettingsSave, 300);
 }
@@ -512,8 +508,9 @@ function flushSettingsSave(): void {
   saveTimer = null;
   const snapshot = { ...settings };
   saving = saving.then(async () => {
-    try { await api.saveSettings(snapshot); $('settings-saved').textContent = 'Все изменения сохранены'; }
-    catch (error) { $('settings-saved').textContent = 'Не удалось сохранить'; toast(friendlyError(error), true); }
+    // Saving is silent; only a failure is worth interrupting for.
+    try { await api.saveSettings(snapshot); }
+    catch (error) { toast(`Настройки не сохранены. ${friendlyError(error)}`, true); }
   });
 }
 
@@ -612,8 +609,9 @@ $('prepare-button').addEventListener('click', () => void prepare());
 $('hide-window').addEventListener('click', () => api.hide());
 $('copy-result').addEventListener('click', () => void copyText(resultText.value));
 resultText.addEventListener('input', () => { lastResult = resultText.value; syncResultActions(); });
-$('refresh-mics').addEventListener('click', () => void refreshMicrophones());
 function renderNativeHealth(state: import('../main/native-recovery').NativeHealth): void {
+  // Shown only when the global shortcuts need attention.
+  $('native-problem').hidden = state.ready;
   $('native-health').textContent = state.message;
   $<HTMLButtonElement>('native-restart').disabled = state.retrying;
 }
@@ -633,8 +631,6 @@ navigator.mediaDevices?.addEventListener('devicechange', () => void refreshMicro
 const unsubscribe = api.onCommand(command => { void handleCommand(command); });
 const unsubscribeUpdates = api.onUpdateState(renderUpdate);
 $('update-check').addEventListener('click', () => { void api.checkForUpdates().then(renderUpdate).catch(error => toast(friendlyError(error), true)); });
-$('update-download').addEventListener('click', () => { void api.downloadUpdate().then(renderUpdate).catch(error => toast(friendlyError(error), true)); });
-$('update-install').addEventListener('click', () => void installUpdate());
 $('update-notice-action').addEventListener('click', () => {
   if (updateState.phase === 'ready') void installUpdate();
   else void api.downloadUpdate().then(renderUpdate).catch(error => toast(friendlyError(error), true));
@@ -658,9 +654,7 @@ async function boot(): Promise<void> {
   if (loaded[1].status === 'fulfilled') {
     const info = loaded[1].value;
     $('version').textContent = `Voice Scribe ${info.version}`;
-    $('data-path').textContent = `Данные приложения: ${info.dataPath}`;
     modelBundled = info.modelBundled;
-    if (!modelBundled) $('model-note').textContent = 'Интернет нужен только для первой загрузки модели (~230 МБ). Распознавание работает на этом компьютере.';
     if (!info.nativeReady) toast('Глобальные клавиши пока недоступны. Диктовка кнопкой работает; текст можно вставить через Ctrl + V.', true);
   }
   await refreshMicrophones();
