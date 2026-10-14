@@ -70,6 +70,8 @@ const working = () => phase === 'transcribing' || phase === 'preparing';
 const isBusy = () => !['idle', 'error'].includes(phase);
 const canStart = () => ['idle', 'error'].includes(phase) || (phase === 'preparing' && warming);
 const valid = (token: number) => token === generation;
+/** Longer recordings are finished automatically: the audio stays in memory until recognition (~230 MB per hour). */
+const MAX_RECORDING_SECONDS = 60 * 60;
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
 
 function renderUpdate(state = updateState): void {
@@ -153,6 +155,7 @@ function setPhase(value: Phase, message?: string): void {
   syncResultActions();
   renderUpdate();
   if (value !== 'recording') bars.forEach(bar => { bar.style.removeProperty('transform'); });
+  syncTicker();
   api.status({ phase, message: statusMessage, ...renderWork(), level: 0 });
 }
 
@@ -174,8 +177,8 @@ function fail(error: unknown, token: number): void {
   gesture.reset();
   session?.recorder.cancel();
   session = null;
-  void api.cancelGigaam().catch(() => {});
-  modelReady = false;
+  // Microphone errors leave the model loaded (or loading); only failed model work restarts GigaAM.
+  if (working()) { void api.cancelGigaam().catch(() => {}); modelReady = false; }
   const message = friendlyError(error);
   setPhase('error', message);
   toast(message, true);
@@ -551,12 +554,23 @@ function playCue(kind: 'start' | 'done'): void {
 }
 
 const levels = new Float32Array(512);
-const ticker = setInterval(() => {
+/** Runs only while busy: an idle window has nothing to animate or report. */
+let ticker: ReturnType<typeof setInterval> | null = null;
+function syncTicker(): void {
+  if (isBusy() && !ticker) ticker = setInterval(tick, 100);
+  else if (!isBusy() && ticker) { clearInterval(ticker); ticker = null; }
+}
+function tick(): void {
   let level = 0;
   const active = session;
   if (phase === 'recording' && active) {
     lastSeconds = active.recorder.durationSec;
     $('timer').textContent = formatTime(lastSeconds);
+    if (lastSeconds >= MAX_RECORDING_SECONDS) {
+      toast('Запись длилась час и завершена автоматически.');
+      void finish();
+      return;
+    }
     if (active.recorder.analyser) {
       active.recorder.analyser.getFloatTimeDomainData(levels);
       const rms = Math.sqrt(levels.reduce((sum, sample) => sum + sample * sample, 0) / levels.length);
@@ -580,7 +594,7 @@ const ticker = setInterval(() => {
     }
   }
   api.status({ phase, message: statusMessage, ...renderWork(), level });
-}, 100);
+}
 
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) button.addEventListener('click', () => navigate(button.dataset.view!));
 recordButton.addEventListener('click', () => { if (phase === 'recording' || phase === 'starting') void finish(); else void start(null); });
@@ -624,7 +638,7 @@ $('update-notice-action').addEventListener('click', () => {
 });
 window.addEventListener('beforeunload', () => {
   unsubscribeNative();
-  clearInterval(ticker);
+  if (ticker) clearInterval(ticker);
   unsubscribe();
   unsubscribeUpdates();
   session?.recorder.cancel();

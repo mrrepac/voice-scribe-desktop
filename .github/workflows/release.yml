@@ -3,15 +3,19 @@ on:
   push:
     tags: ['v*']
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  release:
+  # Dependencies run their install scripts here, so this job gets a read-only
+  # token and keeps no git credentials on disk.
+  build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -30,13 +34,38 @@ jobs:
           path: models
           key: gigaam-${{ hashFiles('src/shared/gigaam-model.json') }}
       - run: npm run dist
-      - name: Publish installer and update metadata together
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Collect release files
         shell: pwsh
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          gh release create "v$version" "release/Voice-Scribe-Setup-$version-x64.exe" "release/Voice-Scribe-Setup-$version-x64.exe.blockmap" "release/latest.yml" --verify-tag --draft --title "Voice Scribe $version" --generate-notes
+          New-Item -ItemType Directory -Path upload | Out-Null
+          Copy-Item "release/Voice-Scribe-Setup-$version-x64.exe", "release/Voice-Scribe-Setup-$version-x64.exe.blockmap", "release/latest.yml" upload
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: upload
+          if-no-files-found: error
+          retention-days: 1
+
+  # The only job that can write to the repository runs no project code.
+  publish:
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: upload
+      - name: Publish installer and update metadata together
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          gh release create "v$version" "upload/Voice-Scribe-Setup-$version-x64.exe" "upload/Voice-Scribe-Setup-$version-x64.exe.blockmap" "upload/latest.yml" --verify-tag --draft --title "Voice Scribe $version" --generate-notes
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; it was not published' }
           gh release edit "v$version" --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

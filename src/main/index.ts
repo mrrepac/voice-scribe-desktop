@@ -55,6 +55,14 @@ const trusted=(url:string)=>{try { const u=new URL(url); return u.protocol==='sc
 const send=(command:Command)=>{if(win && !win.isDestroyed())win.webContents.send('command',command);};
 const textArg=(v:unknown)=>{if(typeof v!=='string' || v.length>2_000_000) throw new Error('Некорректный текст');return v;};
 const active=()=>['starting','recording','transcribing','preparing'].includes(lastStatus.phase);
+// The helper swallows bare Enter and Esc system-wide while this holds. Preparing the
+// model is not a dictation: blocking those keys for a (possibly minutes-long) load would break typing.
+const dictating=()=>['starting','recording','transcribing'].includes(lastStatus.phase);
+let tooltip='';
+function setTooltip(text:string):void {
+  const value=text.slice(0,120);
+  if(tray && value!==tooltip){tooltip=value;tray.setToolTip(value);}
+}
 const installed = app.isPackaged && !smoke && !process.env.PORTABLE_EXECUTABLE_FILE && existsSync(path.join(process.resourcesPath,'installed.txt'));
 const updates = new UpdateService(autoUpdater, installed, active, state => {
   if(win && !win.isDestroyed())win.webContents.send('updates:state',state);
@@ -71,7 +79,7 @@ function configureNativeWindow():void {
 function applyHotkey(value:Hotkey):void {
   hotkey=value;
   if(bridge.ready)void bridge.request('set-hotkey',{hotkey}).catch(error=>console.error('Hotkey change failed',error));
-  if(lastStatus.phase==='idle')tray?.setToolTip(`${NAME} · ${hotkeyLabel(hotkey)}`);
+  if(lastStatus.phase==='idle')setTooltip(`${NAME} · ${hotkeyLabel(hotkey)}`);
   if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:hotkeyLabel(hotkey)});
 }
 let finishCapture:((key:CapturedKey|null)=>void)|null=null;
@@ -105,7 +113,7 @@ function showOverlay():void {
 }
 function makeTray():void {
   const icon=nativeImage.createFromPath(path.join(root,'dist/icon.png')).resize({width:24,height:24});
-  tray=new Tray(icon); tray.setToolTip(`${NAME} · ${hotkeyLabel(hotkey)}`); tray.on('double-click',show); refreshTray();
+  tray=new Tray(icon); setTooltip(`${NAME} · ${hotkeyLabel(hotkey)}`); tray.on('double-click',show); refreshTray();
 }
 function refreshTray():void {
   tray?.setContextMenu(Menu.buildFromTemplate([
@@ -225,10 +233,10 @@ function setupIpc():void {
       if(bridge.ready)void bridge.request('cancel-insert').catch(()=>{});
     }
     lastStatus={phase:status.phase,message:String(status.message).slice(0,250),seconds:status.seconds,level:status.level,progress:status.progress,remainingSeconds:status.remainingSeconds};
-    if(changed){refreshTray();if(bridge.ready)void bridge.request('set-active',{active:active()}).catch(()=>{});}
-    tray?.setToolTip(`${NAME} · ${lastStatus.message}`.slice(0,120));
+    if(changed){refreshTray();if(bridge.ready)void bridge.request('set-active',{active:dictating()}).catch(()=>{});}
+    setTooltip(lastStatus.phase==='idle'?`${NAME} · ${hotkeyLabel(hotkey)}`:`${NAME} · ${lastStatus.message}`);
     if(!smoke && active() && !win.isFocused())showOverlay();
-    else {overlay?.hide();overlayShown=false;}
+    else if(overlayShown){overlay?.hide();overlayShown=false;}
     if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:hotkeyLabel(hotkey)});
   });
 }
@@ -274,7 +282,7 @@ else {
       send(event as Command);
     });
     // A restarted helper starts with the default shortcut; reapply the saved one.
-    bridge.on('ready',()=>{configureNativeWindow();applyHotkey(hotkey);applyEnterFinish(enterFinishes);void bridge.request('set-active',{active:active()}).catch(()=>{});});
+    bridge.on('ready',()=>{configureNativeWindow();applyHotkey(hotkey);applyEnterFinish(enterFinishes);void bridge.request('set-active',{active:dictating()}).catch(()=>{});});
     const initial=await storage.settings().catch(()=>null);
     hotkey=initial?.hotkey ?? hotkey;
     enterFinishes=initial?.enterFinishes ?? enterFinishes;
