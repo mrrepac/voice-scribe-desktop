@@ -59,7 +59,7 @@
       if (working) {
         if (status.progress > 0) progress.value = status.progress; else progress.removeAttribute('value');
         const percent = status.progress === undefined ? '' : Math.floor(status.progress) + '% · ';
-        document.getElementById('hint').textContent = percent + (status.remainingSeconds === undefined ? 'Оцениваем время' : 'До конца этапа ≈ ' + format(status.remainingSeconds)) + ' · Esc отменить';
+        document.getElementById('hint').textContent = percent + 'Esc · отменить';
       }
     });
   </script>

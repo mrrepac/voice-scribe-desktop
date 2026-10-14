@@ -24,6 +24,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # GigaAM is bundled into the installer; fetched once per pinned revision.
+      - uses: actions/cache@v6
+        with:
+          path: models
+          key: gigaam-${{ hashFiles('src/shared/gigaam-model.json') }}
       - run: npm run dist
       - name: Publish installer and update metadata together
         env:

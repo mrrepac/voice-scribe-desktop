@@ -8,3 +8,4 @@ artifacts/
 *.log
 .npm-cache/
 tests/asr-generated/
+models/

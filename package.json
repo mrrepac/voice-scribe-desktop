@@ -1,8 +1,8 @@
 {
   "name": "voice-scribe-desktop",
   "productName": "Voice Scribe",
-  "version": "0.3.5",
-  "description": "Локальная голосовая диктовка в любое приложение Windows",
+  "version": "0.4.0",
+  "description": "Лёгкая локальная диктовка GigaAM v3 в любое приложение Windows",
   "author": "mrrepac",
   "license": "MIT",
   "private": true,
@@ -13,18 +13,17 @@
     "typecheck": "tsc --noEmit",
     "start": "npm run build && electron .",
     "test": "node scripts/test.mjs",
-    "pack": "npm run build && electron-builder --win --dir",
-    "dist": "npm run build && electron-builder --win nsis --publish never",
-    "dist:portable": "npm run build && electron-builder --win portable --publish never"
+    "pack": "npm run fetch-model && npm run build && electron-builder --win --dir",
+    "dist": "npm run fetch-model && npm run build && electron-builder --win nsis --publish never",
+    "dist:portable": "npm run fetch-model && npm run build && electron-builder --win portable --publish never",
+    "fetch-model": "node scripts/fetch-model.mjs"
   },
   "devDependencies": {
-    "@huggingface/transformers": "3.8.1",
     "@tabler/icons": "3.49.0",
     "@types/node": "^24.0.0",
-    "electron": "44.6.0",
+    "electron": "44.7.0",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
-    "ffmpeg-static": "5.3.0",
     "typescript": "^5.9.3"
   },
   "build": {
@@ -37,8 +36,6 @@
     },
     "files": [
       "dist/**/*",
-      "!dist/smoke.js",
-      "!dist/fixture.wav",
       "!dist/fixture-ru.wav",
       "package.json",
       "LICENSE",
@@ -48,20 +45,19 @@
     ],
     "extraResources": [
       {
-        "from": "node_modules/ffmpeg-static",
-        "to": ".",
-        "filter": [
-          "ffmpeg.exe",
-          "ffmpeg.exe.LICENSE",
-          "ffmpeg.exe.README"
-        ]
-      },
-      {
         "from": "native/bin",
         "to": "native",
         "filter": [
           "*.exe",
           "*.config"
+        ]
+      },
+      {
+        "from": "models/gigaam-v3-punct",
+        "to": "models/gigaam-v3-punct",
+        "filter": [
+          "*.onnx",
+          "tokens.txt"
         ]
       }
     ],
@@ -106,8 +102,5 @@
     "type": "git",
     "url": "https://github.com/mrrepac/voice-scribe-desktop.git"
   },
-  "homepage": "https://github.com/mrrepac/voice-scribe-desktop",
-  "overrides": {
-    "sharp": "0.35.5"
-  }
+  "homepage": "https://github.com/mrrepac/voice-scribe-desktop"
 }

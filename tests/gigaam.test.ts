@@ -2,8 +2,6 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { cuesFromTokens } from '../src/shared/token-cues';
 import { splitAtPauses, WINDOW_SECONDS } from '../src/shared/quiet-cut';
-import { Recognizer } from '../src/renderer/recognizer';
-import type { AsrClient } from '../src/asr/client';
 
 // Real GigaAM v3 output for the start of a recording (pieces and start times).
 // A lone ' ' piece starts a word, as in the model's ' ', 'след', 'ую'...
@@ -51,48 +49,3 @@ test('audio is split into pause-aligned windows that cover every sample once', (
   assert.equal(covered, pcm.length);
 });
 
-test('the recognizer routes GigaAM to the bridge and Whisper to the worker client', async () => {
-  const calls: string[] = [];
-  let progress: ((value: { pct: number }) => void) | undefined;
-  const bridge = {
-    prepareGigaam: async () => { calls.push('giga-prepare'); progress?.({ pct: 40 }); },
-    recognizeGigaam: async (_pcm: Float32Array, timed: boolean) => { calls.push(`giga-${timed}`); return { text: 'Привет.', segments: [] }; },
-    cancelGigaam: async () => { calls.push('giga-cancel'); },
-    onGigaamProgress: (handler: (value: { pct: number }) => void) => { progress = handler; return () => {}; },
-  };
-  const whisper = {
-    prepare: async () => { calls.push('whisper-prepare'); return { model: 'small', device: 'wasm', f16: false, fellBack: false }; },
-    transcribe: async () => { calls.push('whisper-run'); return 'hello'; },
-    transcribeTimed: async () => ({ text: '', segments: [] }),
-    cancel: () => calls.push('whisper-cancel'),
-    destroy: () => {},
-  } as unknown as AsrClient;
-  const recognizer = new Recognizer(bridge, whisper);
-  const speech = new Float32Array(16000).map((_, i) => 0.3 * Math.sin(i / 4));
-  const giga = { model: 'gigaam', device: 'auto', language: 'en', language2: '' } as const;
-  const seen: unknown[] = [];
-  assert.deepEqual(await recognizer.prepare(giga, value => seen.push(value)), { model: 'gigaam', device: 'wasm', f16: false, fellBack: false });
-  assert.deepEqual(seen, [{ stage: 'model' }, { stage: 'model', pct: 40, dl: true }]);
-  assert.equal(await recognizer.transcribe(speech, giga), 'Привет.');
-  assert.deepEqual(await recognizer.transcribeTimed(speech, giga), { text: 'Привет.', segments: [] });
-  // Silence never reaches the model, as with Whisper.
-  assert.equal(await recognizer.transcribe(new Float32Array(16000), giga), '');
-  assert.equal(await recognizer.transcribe(speech, { ...giga, model: 'small' }), 'hello');
-  recognizer.cancel();
-  assert.deepEqual(calls, ['giga-prepare', 'giga-false', 'giga-true', 'whisper-run', 'whisper-cancel', 'giga-cancel']);
-});
-
-test('Auto picks GigaAM for Russian only and can be kept on Whisper', async () => {
-  const used: string[] = [];
-  const bridge = {
-    prepareGigaam: async () => {}, cancelGigaam: async () => {}, onGigaamProgress: () => () => {},
-    recognizeGigaam: async () => { used.push('gigaam'); return { text: 'Привет.', segments: [] }; },
-  };
-  const whisper = { transcribe: async (_pcm: Float32Array, options: { model: string }) => { used.push(options.model); return 'hello'; } } as unknown as AsrClient;
-  const recognizer = new Recognizer(bridge, whisper);
-  const speech = new Float32Array(16000).map((_, i) => 0.3 * Math.sin(i / 4));
-  const auto = { model: 'auto', device: 'auto', language: 'ru', language2: '' } as const;
-  for (const options of [auto, { ...auto, language2: 'ru' }, { ...auto, language: 'en' }, { ...auto, language: 'auto' }, { ...auto, language2: 'en' }, { ...auto, model: 'small' }, { ...auto, autoGigaam: false }] as const)
-    await recognizer.transcribe(speech, options);
-  assert.deepEqual(used, ['gigaam', 'gigaam', 'auto', 'auto', 'auto', 'small', 'auto']);
-});

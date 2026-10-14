@@ -52,12 +52,11 @@ Events:
   chord is held emits `dictation-abort` and passes through, so Win+Alt+<key>
   Windows shortcuts keep working.
 - `set-hotkey` also accepts a custom shortcut: `key:` + optional `ctrl+`, `alt+`,
-  `win+` (in this order) + a decimal virtual-key code, e.g. `key:ctrl+alt+120`
-  (Ctrl+Alt+F9) or `key:20` (CapsLock alone). Modifiers must match exactly; Shift
-  again means proofreading. Modifier keys and Escape cannot be the main key. When
-  the shortcut has Win, or Alt without Ctrl, the 0xE8 mask is injected as for `win-alt`.
+  `shift+`, `win+` (in this order) + a decimal virtual-key code, e.g. `key:ctrl+shift+68`
+  or `key:120` (F9 alone). Modifiers must match exactly. Modifier keys and Escape cannot
+  be the main key. When the shortcut has Win, or Alt without Ctrl, the 0xE8 mask is injected.
 - `capture-hotkey` reports the next physical non-modifier key press, swallowing it
-  and its release, as `{"event":"hotkey-captured","key":120,"ctrl":false,"alt":false,"win":false,"shift":false}`.
+  and its release, as `{"event":"hotkey-captured","key":120,"ctrl":false,"alt":false,"shift":false,"win":false}`.
   This is the only case where an ordinary key leaves the helper, and only on this
   explicit request. `cancel-capture` stops waiting.
 - `set-scribe-window` with `target` registers the main Scribe HWND with the router.

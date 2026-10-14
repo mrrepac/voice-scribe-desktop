@@ -10,15 +10,9 @@ import { splitAtPauses } from '../shared/quiet-cut';
 import { cuesFromTokens } from '../shared/token-cues';
 import type { Transcript } from '../shared/transcript';
 import type { GigaamRequest, GigaamReply } from '../shared/gigaam';
+import MODEL from '../shared/gigaam-model.json';
 
-const REPO = 'csukuangfj/sherpa-onnx-nemo-transducer-punct-giga-am-v3-russian-2025-12-16';
-const REVISION = 'a6039be7cee829a9044a69ac0ebaf1c191217c97';
-const FILES = [
-  { name: 'encoder.int8.onnx', size: 224570820, sha: '369f35a71bf288d3b8e0391fabd8dba5f2314088d440bca474056b7b4b6e66bf' },
-  { name: 'decoder.onnx', size: 4600132, sha: '38fc7475443ea2a26f63211ca350f73ac50fff824ab7a3876ee2bd610c53bbc4' },
-  { name: 'joiner.onnx', size: 2712896, sha: '602ff7017a93311aad34df1437c8d7f49911353c13d6eae7a6ee7b041339465c' },
-  { name: 'tokens.txt', size: 13354, sha: '39abae20e692998290c574e606f11a9edef2902a1995463fcff63d1490cf22b7' },
-];
+const { repo: REPO, revision: REVISION, files: FILES } = MODEL;
 const TOTAL = FILES.reduce((sum, file) => sum + file.size, 0);
 /** Hugging Face often drops long downloads mid-file; each retry resumes with a Range request. */
 const ATTEMPTS = 30;

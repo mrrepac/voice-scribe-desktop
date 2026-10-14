@@ -266,3 +266,12 @@ fieldset:disabled .switch { opacity: .42; }
 .profile-checks label { display: inline-flex; align-items: center; gap: 6px; }
 .profile-add { display: flex; gap: 8px; }
 .profile-add input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--control-line); border-radius: 4px; background: var(--surface); color: var(--text); }
+
+/* The activity line keeps its height in every phase. */
+.activity { display: flex; align-items: center; gap: 12px; height: 28px; margin-top: 10px; min-width: 0; }
+.activity .waveform { margin-top: 0; flex-shrink: 0; }
+.activity .session-detail { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recorder[data-phase="idle"] .activity .session-detail { display: block; }
+.work-line { display: flex; align-items: center; gap: 8px; flex-shrink: 0; color: var(--muted); font-size: 12px; }
+.work-line[hidden] { display: none; }
+.work-line progress { width: 120px; height: 4px; accent-color: var(--primary); }
