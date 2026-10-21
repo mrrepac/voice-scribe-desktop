@@ -54,7 +54,7 @@ const gigaam=new GigaamService(path.join(root,'dist/gigaam-worker.cjs'),modelBun
 const trusted=(url:string)=>{try { const u=new URL(url); return u.protocol==='scribe:' && u.host==='app'; } catch { return false; }};
 const send=(command:Command)=>{if(win && !win.isDestroyed())win.webContents.send('command',command);};
 const textArg=(v:unknown)=>{if(typeof v!=='string' || v.length>2_000_000) throw new Error('Некорректный текст');return v;};
-const active=()=>['starting','recording','transcribing','preparing'].includes(lastStatus.phase);
+const active=()=>['starting','recording','transcribing','preparing','file'].includes(lastStatus.phase);
 // The helper swallows bare Enter and Esc system-wide while this holds. Preparing the
 // model is not a dictation: blocking those keys for a (possibly minutes-long) load would break typing.
 const dictating=()=>['starting','recording','transcribing'].includes(lastStatus.phase);
@@ -121,7 +121,7 @@ function makeTray():void {
 function refreshTray():void {
   tray?.setContextMenu(Menu.buildFromTemplate([
     {label:`Открыть ${NAME}`,click:show},
-    {label:['starting','recording'].includes(lastStatus.phase) ? 'Остановить диктовку' : 'Записать в буфер',enabled:lastStatus.phase!=='transcribing',click:()=>send({action:'toggle'})},
+    {label:['starting','recording'].includes(lastStatus.phase) ? 'Остановить диктовку' : 'Записать в буфер',enabled:!['transcribing','file'].includes(lastStatus.phase),click:()=>send({action:'toggle'})},
     {label:'Отменить',enabled:active(),click:()=>send({action:'cancel'})},
     {type:'separator'},
     {label:'Выход',click:()=>{quitting=true;app.quit();}},
@@ -189,7 +189,7 @@ function setupIpc():void {
   handle('native:restart',()=>{if(active())throw new Error('Дождитесь завершения записи или обработки');nativeRecovery.restart();});
   ipcMain.on('hide',event=>{if(event.sender===win.webContents)win.hide();});
   ipcMain.on('status',(event,status:Status)=>{
-    if(event.sender!==win.webContents || !status || !['idle','starting','recording','transcribing','preparing','error'].includes(status.phase))return;
+    if(event.sender!==win.webContents || !status || !['idle','starting','recording','transcribing','preparing','file','error'].includes(status.phase))return;
     const changed=status.phase!==lastStatus.phase;
     if(changed && ['idle','error'].includes(status.phase)){
       deliveryGeneration++;
@@ -199,7 +199,8 @@ function setupIpc():void {
     if(changed){refreshTray();if(bridge.ready)void bridge.request('set-active',{active:dictating()}).catch(()=>{});}
     syncEnterFinish();
     setTooltip(lastStatus.phase==='idle'?`${NAME} · ${hotkeyLabel(hotkey)}`:`${NAME} · ${lastStatus.message}`);
-    if(!smoke && active() && !win.isFocused())showOverlay();
+    // A file is transcribed in the window, without global keys: the pill would promise an Esc that does not work.
+    if(!smoke && active() && lastStatus.phase!=='file' && !win.isFocused())showOverlay();
     else if(overlayShown){overlay?.hide();overlayShown=false;}
     if(overlay && !overlay.isDestroyed())overlay.webContents.send('status',{...lastStatus,hotkey:hotkeyLabel(hotkey)});
   });

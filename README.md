@@ -7,6 +7,11 @@
 Можно выбрать любую клавишу для записи, а Enter во время записи вставляет текст
 и сразу отправляет его. Программа обновляется сама.
 
+Аудио- или видеофайл (MP3, WAV, M4A, OGG, FLAC, MP4, WebM, MKV) можно расшифровать
+прямо в окне: кнопка **«Расшифровать файл»** или перетаскивание файла в окно. Текст
+появляется по мере распознавания, без разметки ораторов и времени. Esc отменяет
+расшифровку. Файл читается целиком в память, поэтому размер ограничен 2 ГБ.
+
 С версии 0.4.0 Voice Scribe — это бывшая Voice Scribe Lite. Прежняя полная версия
 с Whisper, расшифровкой файлов, определением ораторов, вычиткой через API и историей
 больше не развивается; её код остался в ветке `full-app` и в тегах до v0.3.5.
@@ -89,7 +94,7 @@ npm run typecheck
 npm test
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/gigaam-fixture.ps1
 node scripts/build.mjs --smoke
-.\node_modules\electron\dist\electron.exe . --smoke-test --gigaam-test --dictation-test
+.\node_modules\electron\dist\electron.exe . --smoke-test --gigaam-test --dictation-test --file-test
 ```
 
 Проверочный запуск использует `.data/smoke` и может загрузить модель.

@@ -6,7 +6,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   microphone: '', silenceSeconds: 0, sounds: true, startAtLogin: false, hotkey: 'ctrl-space',
 };
-export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'error';
+/** 'file': an audio or video file is transcribed in the window; no dictation keys are involved. */
+export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'file' | 'error';
 export interface Status {
   phase: Phase; message: string; seconds?: number; level?: number; progress?: number;
   /** The dictation will be inserted into a window (not only copied to the clipboard). */

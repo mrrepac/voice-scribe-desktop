@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { NativeBridge } from './native';
 import { gigaamSmokeTest } from './gigaam-smoke';
 import { dictationSmokeTest } from './dictation-smoke';
+import { fileSmokeTest } from './file-smoke';
 
 export interface SmokeContext { win: BrowserWindow; bridge: NativeBridge; }
 
@@ -25,6 +26,7 @@ export async function runSmoke({ win, bridge }: SmokeContext): Promise<void> {
     const giga=process.argv.includes('--gigaam-test')?await gigaamSmokeTest(win):undefined;
     if(giga)console.log('GIGAAM_SMOKE',JSON.stringify(giga));
     if(process.argv.includes('--dictation-test'))console.log('DICTATION_SMOKE',JSON.stringify(await dictationSmokeTest(win)));
+    if(process.argv.includes('--file-test'))console.log('FILE_SMOKE',JSON.stringify(await fileSmokeTest(win)));
     if(!bridge.ready)await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Native helper startup timeout')),10000);bridge.once('ready',()=>{clearTimeout(timer);resolve();});bridge.once('failure',message=>{clearTimeout(timer);reject(new Error(message));});});
     const native=await bridge.request('diagnostics');
     await writeFile(path.join(out,'smoke-result.json'),JSON.stringify({ok:true,result,native,logs},null,2));

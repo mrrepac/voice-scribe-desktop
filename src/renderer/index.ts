@@ -1,6 +1,7 @@
 import { Recorder } from '../asr/recorder';
 import { DEFAULT_SETTINGS, type Settings, type Phase, type Command } from '../shared/contracts';
 import { trimSilence } from '../shared/clean';
+import { quietCut } from '../shared/quiet-cut';
 import { DictationGesture } from './gesture';
 import { deliveryMessage } from './delivery-message';
 import type { UpdateState } from '../shared/updates';
@@ -58,19 +59,26 @@ let cueContext: AudioContext | null = null;
 let lastSeconds = 0;
 let workStarted = 0;
 let downloadPercent: number | undefined;
+/** Share of the file already recognized while transcribing a file. */
+let filePercent: number | undefined;
 // "Подготовить модель" (source checkouts only) loads the model; dictation may start and queue behind it.
 let warming = false;
 /** GigaAM is loaded in its process; cancelling recognition kills that process and unloads it. */
 let modelReady = false;
 /** Installed builds carry the model, so there is nothing to prepare up front. */
 let modelBundled = false;
+let fileName = '';
 
-const working = () => phase === 'transcribing' || phase === 'preparing';
+const working = () => phase === 'transcribing' || phase === 'preparing' || phase === 'file';
 const isBusy = () => !['idle', 'error'].includes(phase);
 const canStart = () => ['idle', 'error'].includes(phase) || (phase === 'preparing' && warming);
 const valid = (token: number) => token === generation;
 /** Longer recordings are finished automatically: the audio stays in memory until recognition (~230 MB per hour). */
 const MAX_RECORDING_SECONDS = 60 * 60;
+/** Files are sent to GigaAM in pause-aligned parts, so the text appears as it is recognized and Esc stops it quickly. */
+const FILE_PART_SECONDS = 5 * 60;
+/** The whole file is read into memory to decode its sound track. */
+const MAX_FILE_BYTES = 2 * 1024 ** 3;
 const formatTime = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
 
 function renderUpdate(state = updateState): void {
@@ -102,7 +110,7 @@ async function installUpdate(): Promise<void> {
 
 function renderWork() {
   const seconds = working() ? (performance.now() - workStarted) / 1000 : lastSeconds;
-  const progress = phase === 'preparing' ? downloadPercent : undefined;
+  const progress = phase === 'preparing' ? downloadPercent : phase === 'file' ? downloadPercent ?? filePercent : undefined;
   $('work-status').hidden = !working();
   if (working()) {
     $('timer').textContent = formatTime(seconds);
@@ -125,7 +133,7 @@ function setPhase(value: Phase, message?: string): void {
   if (value !== 'preparing') warming = false;
   if ((value === 'transcribing' || value === 'preparing') && !working()) workStarted = performance.now();
   phase = value;
-  statusMessage = value === 'error' ? 'Ошибка' : message ?? ({ idle: 'Готово', starting: 'Подключение', recording: 'Запись', transcribing: 'Распознаём речь', preparing: 'Подготовка модели', error: 'Ошибка' })[value];
+  statusMessage = value === 'error' ? 'Ошибка' : message ?? ({ idle: 'Готово', starting: 'Подключение', recording: 'Запись', transcribing: 'Распознаём речь', preparing: 'Подготовка модели', file: 'Расшифровываем файл', error: 'Ошибка' })[value];
   $('record-card').dataset.phase = value;
   $('status-label').textContent = statusMessage;
   const descriptions: Record<Phase, string> = {
@@ -134,11 +142,12 @@ function setPhase(value: Phase, message?: string): void {
     recording: session?.target ? `Текст вставится в выбранное поле${session.enter ? ' и будет нажат Enter' : ''}. Enter — завершить и отправить.` : '',
     transcribing: '',
     preparing: warming ? 'Диктовку можно начать сразу: распознавание дождётся модели.' : 'Первая загрузка может занять несколько минут.',
+    file: fileName,
     error: message ?? 'Проверьте настройки и начните снова.',
   };
   $('record-description').textContent = descriptions[value];
-  recordButton.disabled = !initialized || value === 'transcribing' || (value === 'preparing' && !warming);
-  const buttonLabel = ({ idle: 'Записать', starting: 'Стоп', recording: 'Стоп', transcribing: 'Распознаём…', preparing: warming ? 'Записать' : 'Подготовка…', error: 'Повторить' })[value];
+  recordButton.disabled = !initialized || value === 'transcribing' || value === 'file' || (value === 'preparing' && !warming);
+  const buttonLabel = ({ idle: 'Записать', starting: 'Стоп', recording: 'Стоп', transcribing: 'Распознаём…', preparing: warming ? 'Записать' : 'Подготовка…', file: 'Записать', error: 'Повторить' })[value];
   $('record-button-label').textContent = buttonLabel;
   recordButton.setAttribute('aria-label', buttonLabel);
   $('record-icon').querySelector('use')?.setAttribute('href', value === 'recording' || value === 'starting' ? '#i-stop' : '#i-mic');
@@ -146,6 +155,7 @@ function setPhase(value: Phase, message?: string): void {
   fieldset.disabled = !initialized || isBusy();
   $('settings-busy').hidden = !isBusy();
   $<HTMLButtonElement>('prepare-button').disabled = !initialized || isBusy();
+  $<HTMLButtonElement>('open-file').disabled = !initialized || !canStart();
   $('setup-card').hidden = modelReady || modelBundled;
   resultText.readOnly = isBusy();
   syncResultActions();
@@ -260,6 +270,7 @@ async function decodeAudioTo16kMono(buffer: ArrayBuffer): Promise<Float32Array> 
   const context = new AudioContext({ sampleRate: 16000 });
   try {
     const audio = await context.decodeAudioData(buffer);
+    if (audio.numberOfChannels === 1) return audio.getChannelData(0);
     const mono = new Float32Array(audio.length);
     for (let channel = 0; channel < audio.numberOfChannels; channel++) {
       const data = audio.getChannelData(channel);
@@ -269,6 +280,59 @@ async function decodeAudioTo16kMono(buffer: ArrayBuffer): Promise<Float32Array> 
   } finally {
     await context.close();
   }
+}
+
+async function transcribeFile(file: File): Promise<void> {
+  if (!initialized || !canStart()) return;
+  if (file.size > MAX_FILE_BYTES) { toast('Файл больше 2 ГБ. Сохраните из него только звук (например, в MP3) и откройте снова.', true); return; }
+  navigate('dictation');
+  const token = ++generation;
+  session = null;
+  fileName = file.name;
+  filePercent = undefined;
+  lastSeconds = 0;
+  showResult('', '');
+  setPhase('file', 'Читаем файл');
+  void loadModel(token).catch(() => {});
+  try {
+    let pcm: Float32Array;
+    try { pcm = await decodeAudioTo16kMono(await file.arrayBuffer()); }
+    catch (error) {
+      if (/memory|allocation/i.test(String(error))) throw error;
+      throw new Error('Не удалось прочитать звук из файла. Подходят MP3, WAV, M4A, OGG, FLAC, а также видео MP4 и WebM.');
+    }
+    if (!valid(token)) return;
+    if (!modelReady) {
+      setPhase('file', 'Загружаем модель');
+      await loadModel(token);
+      if (!valid(token)) return;
+    }
+    filePercent = 0;
+    setPhase('file');
+    const texts: string[] = [];
+    for (let offset = 0; offset < pcm.length;) {
+      let part = pcm.subarray(offset, Math.min(pcm.length, offset + FILE_PART_SECONDS * 16000));
+      if (offset + part.length < pcm.length) part = part.subarray(0, quietCut(part));
+      offset += part.length;
+      // A copy, because IPC would clone the whole buffer of a view.
+      const voiced = trimSilence(part);
+      const text = voiced ? (await api.recognizeGigaam(voiced.slice(), false)).text.trim() : '';
+      if (!valid(token)) return;
+      if (text) { texts.push(text); showResult(texts.join(' '), ''); resultText.scrollTop = resultText.scrollHeight; }
+      filePercent = Math.floor(offset / pcm.length * 100);
+    }
+    const duration = formatTime(pcm.length / 16000);
+    if (!texts.length) {
+      setPhase('idle', 'Речь не обнаружена');
+      toast(`В файле «${fileName}» не найдено речи.`);
+      return;
+    }
+    lastResult = texts.join(' ');
+    $('result-note').textContent = `Файл «${fileName}» · ${duration}. Текст можно отредактировать и скопировать.`;
+    setPhase('idle', 'Готово');
+    if (settings.sounds) playCue('done');
+    toast('Файл расшифрован.');
+  } catch (error) { fail(error, token); }
 }
 
 async function start(target: string | null): Promise<void> {
@@ -322,7 +386,7 @@ async function finish(enter = false): Promise<void> {
   } catch (error) { fail(error, token); }
 }
 
-function cancel(message = 'Диктовка отменена', notify = true): void {
+function cancel(message = phase === 'file' ? 'Расшифровка отменена' : 'Диктовка отменена', notify = true): void {
   if (!isBusy()) return;
   generation++;
   gesture.reset();
@@ -354,6 +418,7 @@ async function handleCommand(command: Command): Promise<void> {
   if (!initialized) { pendingCommands.push(command); return; }
   switch (command.action) {
     case 'dictation-down': {
+      if (phase === 'file') { toast('Сначала дождитесь расшифровки файла или отмените её.'); break; }
       const startable = canStart();
       const action = gesture.down(startable ? 'idle' : phase, startable ? generation + 1 : generation);
       if (action === 'start') await start(command.target || null);
@@ -576,6 +641,25 @@ form.querySelector('[name="hotkey"]')!.addEventListener('change', event => {
 $('prepare-button').addEventListener('click', () => void prepare());
 $('hide-window').addEventListener('click', () => api.hide());
 $('copy-result').addEventListener('click', () => void copyText(resultText.value));
+const fileInput = $<HTMLInputElement>('file-input');
+$('open-file').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files?.[0];
+  fileInput.value = '';
+  if (file) void transcribeFile(file);
+});
+// A dropped file is transcribed; without this Chromium would try to open it as a page.
+document.addEventListener('dragover', event => {
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = canStart() ? 'copy' : 'none';
+});
+document.addEventListener('drop', event => {
+  event.preventDefault();
+  const file = event.dataTransfer?.files[0];
+  if (!file) return;
+  if (canStart()) void transcribeFile(file);
+  else toast('Дождитесь окончания текущей записи или расшифровки.');
+});
 resultText.addEventListener('input', () => { lastResult = resultText.value; syncResultActions(); });
 function renderNativeHealth(state: import('../main/native-recovery').NativeHealth): void {
   // Shown only when the global shortcuts need attention.
