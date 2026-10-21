@@ -34,6 +34,8 @@ export interface ScribeAPI {
   saveSettings(settings: Settings): Promise<Settings>;
   deliver(text: string, target: string | null, enter: boolean): Promise<Delivery>;
   copy(text: string): Promise<void>;
+  /** Asks where to save the text as UTF-8; the chosen file name, or null when cancelled. */
+  saveText(text: string, name: string): Promise<string | null>;
   prepareGigaam(): Promise<void>;
   recognizeGigaam(pcm: Float32Array, timed: boolean): Promise<import('./transcript').Transcript>;
   cancelGigaam(): Promise<void>;

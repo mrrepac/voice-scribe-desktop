@@ -68,6 +68,8 @@ let modelReady = false;
 /** Installed builds carry the model, so there is nothing to prepare up front. */
 let modelBundled = false;
 let fileName = '';
+/** The file the text in the window came from; empty for a dictation. Names the saved .txt. */
+let resultSource = '';
 
 const working = () => phase === 'transcribing' || phase === 'preparing' || phase === 'file';
 const isBusy = () => !['idle', 'error'].includes(phase);
@@ -192,6 +194,7 @@ function fail(error: unknown, token: number): void {
 
 function syncResultActions(): void {
   $<HTMLButtonElement>('copy-result').disabled = !initialized || isBusy() || !resultText.value.trim();
+  $<HTMLButtonElement>('save-result').disabled = $<HTMLButtonElement>('copy-result').disabled;
   const text = resultText.value.trim();
   $('word-count').textContent = `${text ? text.split(/\s+/u).length : 0} слов`;
 }
@@ -240,6 +243,7 @@ async function complete(text: string, token: number, target: string | null, ente
     return;
   }
   lastResult = text;
+  resultSource = '';
   showResult(text, 'Вставляем текст…');
   let note: string;
   try {
@@ -289,6 +293,7 @@ async function transcribeFile(file: File): Promise<void> {
   const token = ++generation;
   session = null;
   fileName = file.name;
+  resultSource = file.name;
   filePercent = undefined;
   lastSeconds = 0;
   showResult('', '');
@@ -567,6 +572,16 @@ async function copyText(text: string): Promise<void> {
   catch (error) { toast(friendlyError(error), true); }
 }
 
+async function saveText(text: string): Promise<void> {
+  const now = new Date();
+  const pad = (value: number) => value.toString().padStart(2, '0');
+  const name = resultSource ? resultSource.replace(/\.[^.]+$/, '') : `Диктовка ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}-${pad(now.getMinutes())}`;
+  try {
+    const saved = await api.saveText(text, `${name}.txt`);
+    if (saved) toast(`Текст сохранён в «${saved}».`);
+  } catch (error) { toast(`Не удалось сохранить файл. ${friendlyError(error)}`, true); }
+}
+
 function playCue(kind: 'start' | 'done'): void {
   try {
     cueContext ??= new AudioContext();
@@ -641,6 +656,7 @@ form.querySelector('[name="hotkey"]')!.addEventListener('change', event => {
 $('prepare-button').addEventListener('click', () => void prepare());
 $('hide-window').addEventListener('click', () => api.hide());
 $('copy-result').addEventListener('click', () => void copyText(resultText.value));
+$('save-result').addEventListener('click', () => void saveText(resultText.value));
 const fileInput = $<HTMLInputElement>('file-input');
 $('open-file').addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => {

@@ -10,6 +10,7 @@ const api: ScribeAPI = {
   saveSettings:s=>ipcRenderer.invoke('settings:save',s),
   deliver:(text,target,enter)=>ipcRenderer.invoke('deliver',text,target,enter),
   copy:text=>ipcRenderer.invoke('copy',text),
+  saveText:(text,name)=>ipcRenderer.invoke('save-text',text,name),
   prepareGigaam:()=>ipcRenderer.invoke('gigaam:prepare'),
   recognizeGigaam:(pcm,timed)=>ipcRenderer.invoke('gigaam:recognize',pcm,timed),
   cancelGigaam:()=>ipcRenderer.invoke('gigaam:cancel'),

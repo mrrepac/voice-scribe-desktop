@@ -7,6 +7,7 @@ import { GigaamService } from './gigaam';
 import { NativeBridge } from './native';
 import type { Command, Status } from '../shared/contracts';
 import { existsSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { autoUpdater } from 'electron-updater';
 import { UpdateService } from './updates';
 import { NativeRecovery } from './native-recovery';
@@ -159,6 +160,14 @@ function setupIpc():void {
     const run=deliveryQueue.then(async()=>{await clipboard.writeText(value);});
     deliveryQueue=run.catch(()=>{});
     return run;
+  });
+  handle('save-text',async(text,name)=>{
+    const value=textArg(text);
+    const base=(typeof name==='string'?name:'').replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').trim().slice(0,120) || 'Текст';
+    const {canceled,filePath}=await dialog.showSaveDialog(win,{defaultPath:path.join(app.getPath('documents'),base.endsWith('.txt')?base:base+'.txt'),filters:[{name:'Текст',extensions:['txt']}]});
+    if(canceled || !filePath)return null;
+    await writeFile(filePath,value,'utf8');
+    return path.basename(filePath);
   });
   handle('deliver',(text,target,enter)=>{
     const value=textArg(text);
