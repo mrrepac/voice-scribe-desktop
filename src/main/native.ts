@@ -51,6 +51,10 @@ export class NativeBridge extends EventEmitter {
         this.clearStartupTimer();
         this.ready = true;
         this.emit('ready');
+      } else if (msg.event === 'permission') {
+        // macOS: the helper waits for Accessibility and becomes ready once it is granted.
+        this.clearStartupTimer();
+        this.emit('permission', String(msg.permission));
       } else if (msg.event === 'hotkey') {
         this.emit('hotkey', msg);
       } else if (msg.event === 'hotkey-captured') {

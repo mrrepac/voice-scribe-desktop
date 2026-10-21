@@ -11,11 +11,12 @@ test('paste accepted without Enter never claims Enter was sent', () => {
 test('successful explicit finish can report Enter and never expose protocol keys', () => {
   assert.match(deliveryMessage({ status: 'inserted', entered: true }, true, true), /с Enter/);
   for (const reason of ['target-changed', 'modifiers-held', 'input-blocked', 'unknown-protocol-key']) {
-    const text = deliveryMessage({ status: 'clipboard-only', reason }, true, false);
+    const text = deliveryMessage({ status: 'clipboard-only', reason }, true, false, false);
     assert.doesNotMatch(text, new RegExp(reason));
     assert.match(text, /Ctrl \+ V/);
   }
 });
 test('UI microphone and file results describe clipboard-only mode without warning', () => {
-  assert.equal(deliveryMessage({ status: 'clipboard-only', reason: 'no-target' }, false, false), 'Текст скопирован в буфер обмена. Вставьте его с помощью Ctrl + V.');
+  assert.equal(deliveryMessage({ status: 'clipboard-only', reason: 'no-target' }, false, false, false), 'Текст скопирован в буфер обмена. Вставьте его с помощью Ctrl + V.');
+  assert.equal(deliveryMessage({ status: 'clipboard-only', reason: 'no-target' }, false, false, true), 'Текст скопирован в буфер обмена. Вставьте его с помощью ⌘V.');
 });

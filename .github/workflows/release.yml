@@ -1,4 +1,4 @@
-name: Windows release
+name: Release
 on:
   push:
     tags: ['v*']
@@ -47,17 +47,50 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Check tag matches package version
+        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - uses: actions/cache@v6
+        with:
+          path: models
+          key: gigaam-${{ hashFiles('src/shared/gigaam-model.json') }}
+      - run: npm run dist:mac
+      - name: Collect release files
+        run: |
+          version=$(node -p "require('./package.json').version")
+          mkdir upload
+          cp "release/Voice-Scribe-$version-arm64.dmg" "release/Voice-Scribe-$version-arm64.zip" release/latest-mac.yml upload/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-mac
+          path: upload
+          if-no-files-found: error
+          retention-days: 1
+
   # The only job that can write to the repository runs no project code.
   publish:
-    needs: build
+    needs: [build, build-mac]
     runs-on: windows-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: release
+          pattern: release*
           path: upload
+          merge-multiple: true
       - name: Publish installer and update metadata together
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,7 +98,7 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME.Substring(1)
-          gh release create "v$version" "upload/Voice-Scribe-Setup-$version-x64.exe" "upload/Voice-Scribe-Setup-$version-x64.exe.blockmap" "upload/latest.yml" --verify-tag --draft --title "Voice Scribe $version" --generate-notes
+          gh release create "v$version" "upload/Voice-Scribe-Setup-$version-x64.exe" "upload/Voice-Scribe-Setup-$version-x64.exe.blockmap" "upload/latest.yml" "upload/Voice-Scribe-$version-arm64.dmg" "upload/Voice-Scribe-$version-arm64.zip" "upload/latest-mac.yml" --verify-tag --draft --title "Voice Scribe $version" --generate-notes
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; it was not published' }
           gh release edit "v$version" --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

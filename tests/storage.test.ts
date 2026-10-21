@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import { mkdtemp, readFile, writeFile, rm, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { Storage, validateSettings } from '../src/main/storage';
+import { DEFAULT_SETTINGS } from '../src/shared/contracts';
 
 test('corrupt settings recover a backup, preserve the original and report recovery once', async () => {
   const base=await mkdtemp(path.resolve('.test-build/recovery-'));
@@ -36,10 +37,10 @@ test('settings reject unsafe values and bound memory usage',()=>{
   const settings=validateSettings({silenceSeconds:-2,startAtLogin:'true',microphone:'a'.repeat(1000),model:'turbo',replacements:'x = y'});
   assert.equal(settings.silenceSeconds,2);assert.equal(settings.startAtLogin,false);assert.equal(settings.microphone.length,300);
   assert.equal('model' in settings,false);assert.equal('replacements' in settings,false,'removed settings are dropped');
-  assert.equal(validateSettings({hotkey:'toString'}).hotkey,'ctrl-space');
+  assert.equal(validateSettings({hotkey:'toString'}).hotkey,DEFAULT_SETTINGS.hotkey);
   assert.equal(validateSettings({hotkey:'win-alt'}).hotkey,'win-alt');
   assert.equal(validateSettings({hotkey:'key:ctrl+shift+68'}).hotkey,'key:ctrl+shift+68');
-  assert.equal(validateSettings({hotkey:'key:65'}).hotkey,'ctrl-space');
+  assert.equal(validateSettings({hotkey:'key:65'}).hotkey,DEFAULT_SETTINGS.hotkey);
 });
 
 test('settings survive a restart',async()=>{

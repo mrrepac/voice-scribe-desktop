@@ -70,7 +70,7 @@
           </div>
           <div class="settings-group">
             <h2>Программа</h2>
-            <label class="row">Запускать вместе с Windows<span class="switch"><input type="checkbox" name="startAtLogin"><span></span></span></label>
+            <label class="row"><span id="login-label">Запускать вместе с Windows</span><span class="switch"><input type="checkbox" name="startAtLogin"><span></span></span></label>
             <div class="row" id="native-problem" hidden><span id="native-health" role="status"></span><button type="button" class="button button-small" id="native-restart">Подключить заново</button></div>
             <div class="row"><span><span id="version">Voice Scribe</span><small id="update-status" role="status"></small></span><button id="update-check" class="button button-small" type="button">Проверить обновления</button></div>
           </div>
@@ -81,7 +81,7 @@
         <dl class="shortcut-list">
           <div><dt><kbd data-hotkey="main">Ctrl + Space</kbd></dt><dd>Начать или завершить запись. Удерживайте, чтобы записывать до отпускания.</dd></div>
           <div><dt><kbd>Enter</kbd></dt><dd>Во время записи: вставить текст и отправить.</dd></div>
-          <div><dt><kbd>Ctrl + Alt + V</kbd></dt><dd>Вставить последний текст.</dd></div>
+          <div><dt><kbd id="paste-last-key">Ctrl + Alt + V</kbd></dt><dd>Вставить последний текст.</dd></div>
           <div><dt><kbd>Esc</kbd></dt><dd>Отменить запись.</dd></div>
         </dl>
       </details>

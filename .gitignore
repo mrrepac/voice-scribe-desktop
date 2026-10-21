@@ -9,3 +9,4 @@ artifacts/
 .npm-cache/
 tests/asr-generated/
 models/
+native/mac/build/

@@ -1,4 +1,6 @@
-# Windows helper
+# Shortcut helpers
+
+## Windows
 
 `build.ps1` compiles `bin/VoiceScribe.Native.exe` with the .NET Framework compiler
 already provided by Windows. No SDK, NuGet packages, or administrator privileges
@@ -115,3 +117,24 @@ foreground, and no modifier is held. If focus changes after paste, the result is
 a different field within the same top-level window. Text stays on the clipboard
 for manual paste. The parent should time out helper requests after at least
 2500 ms and terminate a stuck child process.
+
+## macOS
+
+`mac/build.sh` compiles `bin/VoiceScribeHelper`, a universal (arm64 + x86_64) binary,
+with `swiftc` from the Xcode command line tools; `npm run build` runs it on macOS.
+`--self-test` checks shortcut routing with a fake clock, `--diagnostics` reports the
+permission state. The helper speaks protocol version 1 above, with these differences:
+
+- A Quartz event tap (`cgSessionEventTap`) replaces the keyboard hook. It needs
+  **Accessibility** for Voice Scribe (macOS attributes the helper to the app that
+  started it). Without it the helper asks once, emits
+  `{"event":"permission","permission":"accessibility"}` (or `input-monitoring` when the
+  tap still cannot be created) and retries every second; `ready` follows as soon as
+  the permission is granted, without a restart.
+- Key codes are translated to Windows virtual-key codes, so shortcuts are stored the
+  same way: `ctrl` is Control, `alt` is Option, `win` is Command. `win-alt` is left
+  Command + left Option; nothing needs masking. `insert` is the Help key.
+- Targets are process ids of the frontmost application instead of HWNDs. Insertion
+  posts Command+V (and Return) with the `eventSourceUserData` marker 0x56534352 and
+  checks that the same application is still frontmost. Without Accessibility it
+  returns `input-blocked`. `window-info` returns the executable name.

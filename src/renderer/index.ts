@@ -5,7 +5,8 @@ import { quietCut } from '../shared/quiet-cut';
 import { DictationGesture } from './gesture';
 import { deliveryMessage } from './delivery-message';
 import type { UpdateState } from '../shared/updates';
-import { capturedHotkey, hotkeyLabel, isHotkey } from '../shared/hotkeys';
+import { capturedHotkey, hotkeyLabel, isHotkey, MAC_DEFAULT_HOTKEY } from '../shared/hotkeys';
+import { IS_MAC } from '../shared/platform';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -140,7 +141,7 @@ function setPhase(value: Phase, message?: string): void {
   $('status-label').textContent = statusMessage;
   const descriptions: Record<Phase, string> = {
     idle: `${hotkeyLabel(settings.hotkey)} — запись в любом приложении`,
-    starting: 'Разрешите приложению использовать микрофон, если Windows спросит.',
+    starting: `Разрешите приложению использовать микрофон, если ${IS_MAC ? 'macOS' : 'Windows'} спросит.`,
     recording: session?.target ? `Текст вставится в выбранное поле${session.enter ? ' и будет нажат Enter' : ''}. Enter — завершить и отправить.` : '',
     transcribing: '',
     preparing: warming ? 'Диктовку можно начать сразу: распознавание дождётся модели.' : 'Первая загрузка может занять несколько минут.',
@@ -170,7 +171,9 @@ function setPhase(value: Phase, message?: string): void {
 function friendlyError(error: unknown): string {
   const value = (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
   const name = error instanceof Error ? error.name : '';
-  if (name === 'NotAllowedError' || /permission|notallowed/i.test(value)) return 'Нет доступа к микрофону. Разрешите доступ в Windows → Параметры → Конфиденциальность → Микрофон.';
+  if (name === 'NotAllowedError' || /permission|notallowed/i.test(value)) return IS_MAC
+    ? 'Нет доступа к микрофону. Разрешите его Voice Scribe в «Системные настройки → Конфиденциальность и безопасность → Микрофон».'
+    : 'Нет доступа к микрофону. Разрешите доступ в Windows → Параметры → Конфиденциальность → Микрофон.';
   if (name === 'NotFoundError' || /device not found/i.test(value)) return 'Микрофон не найден. Подключите его и проверьте выбор в настройках.';
   if (name === 'NotReadableError') return 'Не удалось открыть микрофон. Проверьте, не занят ли он другим приложением, и попробуйте снова.';
   if (/decode|EncodingError/i.test(value)) return 'Не удалось прочитать запись с микрофона. Попробуйте ещё раз.';
@@ -476,7 +479,7 @@ let hotkeyCapturing = false;
 function syncHotkeyOption(): void {
   const select = form.querySelector<HTMLSelectElement>('[name="hotkey"]')!;
   select.querySelector('option[data-custom]')?.remove();
-  if (!settings.hotkey.startsWith('key:')) return;
+  if (!settings.hotkey.startsWith('key:') || Array.from(select.options).some(option => option.value === settings.hotkey)) return;
   const option = new Option(hotkeyLabel(settings.hotkey), settings.hotkey);
   option.dataset.custom = '';
   select.add(option, select.querySelector<HTMLOptionElement>('option[value="capture"]'));
@@ -677,13 +680,22 @@ document.addEventListener('drop', event => {
   else toast('Дождитесь окончания текущей записи или расшифровки.');
 });
 resultText.addEventListener('input', () => { lastResult = resultText.value; syncResultActions(); });
+let nativePermission: string | undefined;
 function renderNativeHealth(state: import('../main/native-recovery').NativeHealth): void {
   // Shown only when the global shortcuts need attention.
   $('native-problem').hidden = state.ready;
   $('native-health').textContent = state.message;
-  $<HTMLButtonElement>('native-restart').disabled = state.retrying;
+  const button = $<HTMLButtonElement>('native-restart');
+  button.disabled = state.retrying;
+  // macOS: the helper waits for a permission and connects by itself once it is granted.
+  button.textContent = state.permission ? 'Открыть настройки' : 'Подключить заново';
+  if (state.permission && state.permission !== nativePermission) toast(state.message, true);
+  nativePermission = state.permission;
 }
-$('native-restart').addEventListener('click', () => { void api.restartNative().catch(error => toast(friendlyError(error), true)); });
+$('native-restart').addEventListener('click', () => {
+  const action = nativePermission ? api.openAccessibilitySettings() : api.restartNative();
+  void action.catch(error => toast(friendlyError(error), true));
+});
 const unsubscribeNative = api.onNativeHealth(renderNativeHealth);
 void api.getNativeHealth().then(renderNativeHealth).catch(() => {});
 form.addEventListener('submit', event => event.preventDefault());
@@ -707,6 +719,16 @@ window.addEventListener('beforeunload', () => {
   if (cueContext) void cueContext.close();
 });
 
+/** macOS: its own shortcut presets (Control+Space switches the input source) and names. */
+function adaptToMac(): void {
+  const select = form.querySelector<HTMLSelectElement>('[name="hotkey"]')!;
+  const presets: Array<[string, string]> = [[MAC_DEFAULT_HOTKEY, hotkeyLabel(MAC_DEFAULT_HOTKEY)], ['ctrl-space', '⌃ Space'], ['ctrl-alt-space', '⌃⌥ Space'], ['win-alt', 'Левые ⌘ + ⌥'], ['capture', 'Своя клавиша…']];
+  select.replaceChildren(...presets.map(([value, label]) => new Option(label, value)));
+  $('login-label').textContent = 'Запускать при входе в систему';
+  $('paste-last-key').textContent = hotkeyLabel('key:ctrl+alt+86' as never, true, true);
+}
+if (IS_MAC) adaptToMac();
+
 async function boot(): Promise<void> {
   void api.getUpdateState().then(renderUpdate).catch(() => renderUpdate({ phase: 'error', message: 'Не удалось проверить доступность обновлений.' }));
   setPhase('idle');
@@ -717,7 +739,7 @@ async function boot(): Promise<void> {
     const info = loaded[1].value;
     $('version').textContent = `Voice Scribe ${info.version}`;
     modelBundled = info.modelBundled;
-    if (!info.nativeReady) toast('Глобальные клавиши пока недоступны. Диктовка кнопкой работает; текст можно вставить через Ctrl + V.', true);
+    if (!info.nativeReady && !nativePermission) toast(`Глобальные клавиши пока недоступны. Диктовка кнопкой работает; текст можно вставить через ${IS_MAC ? '⌘V' : 'Ctrl + V'}.`, true);
   }
   await refreshMicrophones();
   applySettings();

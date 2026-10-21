@@ -1,5 +1,10 @@
+import { IS_MAC } from './platform';
+
 export type Preset = 'ctrl-space' | 'ctrl-alt-space' | 'win-alt' | 'insert';
-/** A preset, or `key:` + modifiers (ctrl, alt, shift, win in this order) + a Windows virtual-key code, e.g. `key:ctrl+alt+120`. */
+/**
+ * A preset, or `key:` + modifiers (ctrl, alt, shift, win in this order) + a Windows virtual-key code, e.g. `key:ctrl+alt+120`.
+ * On macOS the same names stand for Control, Option, Shift and Command, and the helper translates key codes.
+ */
 export type Hotkey = Preset | `key:${string}`;
 
 export const HOTKEYS: Record<Preset, { name: string; label: string }> = {
@@ -12,6 +17,14 @@ export const HOTKEYS: Record<Preset, { name: string; label: string }> = {
 /** A shortcut, or a key press reported by the native helper while it records a new one. */
 export interface CustomHotkey { ctrl: boolean; alt: boolean; shift: boolean; win: boolean; key: number }
 export type CapturedKey = CustomHotkey;
+
+/** Option + Space: Control + Space switches the input source on macOS. */
+export const MAC_DEFAULT_HOTKEY: Hotkey = 'key:alt+32';
+export const DEFAULT_HOTKEY: Hotkey = IS_MAC ? MAC_DEFAULT_HOTKEY : 'ctrl-space';
+/** macOS shows modifiers as symbols, in Apple's order: ⌃ ⌥ ⇧ ⌘. */
+const MAC_PRESETS: Record<Preset, string> = { 'ctrl-space': '⌃ Space', 'ctrl-alt-space': '⌃⌥ Space', 'win-alt': '⌘⌥', insert: 'Help' };
+/** Display names of the modifiers, for messages. */
+export const modifierNames = (mac = IS_MAC) => mac ? { ctrl: '⌃', alt: '⌥', shift: '⇧', win: '⌘' } : { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', win: 'Win' };
 
 const isPreset = (value: unknown): value is Preset => typeof value === 'string' && Object.hasOwn(HOTKEYS, value);
 const MODIFIER_KEYS = new Set([0x10, 0x11, 0x12, 0x5b, 0x5c, 0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5]);
@@ -28,7 +41,11 @@ const NAMES: Record<number, string> = {
   0xba: ';', 0xbb: '=', 0xbc: ',', 0xbd: '-', 0xbe: '.', 0xbf: '/', 0xc0: '`', 0xdb: '[', 0xdc: '\\', 0xdd: ']', 0xde: "'", 0xe2: '\\ (102)',
 };
 
-export function keyName(key: number): string {
+/** Keys a Mac keyboard names differently; the helper reports Windows key codes. */
+const MAC_NAMES: Record<number, string> = { 0x08: 'Delete', 0x0d: 'Return', 0x2d: 'Help', 0x2e: '⌦' };
+
+export function keyName(key: number, mac = IS_MAC): string {
+  if (mac && MAC_NAMES[key]) return MAC_NAMES[key];
   if (NAMES[key]) return NAMES[key];
   if ((key >= 0x30 && key <= 0x39) || (key >= 0x41 && key <= 0x5a)) return String.fromCharCode(key);
   if (key >= 0x60 && key <= 0x69) return `Num ${key - 0x60}`;
@@ -44,23 +61,28 @@ function typingKey(key: number): boolean {
 }
 
 /** Why a shortcut cannot be used, or null when it can. */
-export function hotkeyProblem(value: CustomHotkey): string | null {
+export function hotkeyProblem(value: CustomHotkey, mac = IS_MAC): string | null {
   const { key, ctrl, alt, shift, win } = value;
+  const m = modifierNames(mac);
   if (!Number.isInteger(key) || key < 0x07 || key > 0xfe || key === 0xe8) return 'Эта клавиша не поддерживается.';
   if (MODIFIER_KEYS.has(key)) return 'Нажмите основную клавишу вместе с модификаторами.';
   if (key === ESCAPE) return 'Esc отменяет запись — выберите другую клавишу.';
-  if (key === V && ctrl && alt && !shift && !win) return 'Ctrl + Alt + V вставляет последний результат — выберите другое сочетание.';
-  if (!ctrl && !alt && !win && typingKey(key)) return `${keyName(key)} без Ctrl, Alt или Win мешала бы печатать. Добавьте модификатор или выберите F-клавишу, Pause, CapsLock и т. п.`;
+  if (key === V && ctrl && alt && !shift && !win) return `${hotkeyLabel('key:ctrl+alt+86' as Hotkey, mac, true)} вставляет последний результат — выберите другое сочетание.`;
+  if (!ctrl && !alt && !win && typingKey(key)) return `${keyName(key)} без ${m.ctrl}, ${m.alt} или ${m.win} мешала бы печатать. Добавьте модификатор или выберите F-клавишу${mac ? '' : ', Pause, CapsLock и т. п'}.`;
   return null;
 }
 
-export function parseCustom(value: unknown): CustomHotkey | null {
+function parseKey(value: unknown): CustomHotkey | null {
   if (typeof value !== 'string') return null;
   const match = /^key:((?:ctrl\+)?(?:alt\+)?(?:shift\+)?(?:win\+)?)(\d{1,3})$/.exec(value);
   if (!match) return null;
   const mods = match[1];
-  const custom = { ctrl: mods.includes('ctrl'), alt: mods.includes('alt'), shift: mods.includes('shift'), win: mods.includes('win'), key: Number(match[2]) };
-  return hotkeyProblem(custom) === null ? custom : null;
+  return { ctrl: mods.includes('ctrl'), alt: mods.includes('alt'), shift: mods.includes('shift'), win: mods.includes('win'), key: Number(match[2]) };
+}
+
+export function parseCustom(value: unknown): CustomHotkey | null {
+  const custom = parseKey(value);
+  return custom && hotkeyProblem(custom) === null ? custom : null;
 }
 
 export function customHotkey(value: CustomHotkey): Hotkey {
@@ -72,17 +94,20 @@ export function customHotkey(value: CustomHotkey): Hotkey {
 }
 
 /** Turns a recorded key press into a shortcut. */
-export function capturedHotkey(value: CapturedKey): { hotkey: Hotkey } | { error: string } {
-  const problem = hotkeyProblem(value);
+export function capturedHotkey(value: CapturedKey, mac = IS_MAC): { hotkey: Hotkey } | { error: string } {
+  const problem = hotkeyProblem(value, mac);
   return problem ? { error: problem } : { hotkey: customHotkey(value) };
 }
 
 export const isHotkey = (value: unknown): value is Hotkey => isPreset(value) || parseCustom(value) !== null;
 
-export function hotkeyLabel(value: Hotkey): string {
-  if (isPreset(value)) return HOTKEYS[value].label;
-  const custom = parseCustom(value);
-  if (!custom) return HOTKEYS['ctrl-space'].label;
-  const mods = [custom.ctrl && 'Ctrl', custom.alt && 'Alt', custom.shift && 'Shift', custom.win && 'Win'].filter((part): part is string => Boolean(part));
-  return [...mods, keyName(custom.key)].join(' + ');
+/** `checked` skips validation, for naming shortcuts that are reserved. */
+export function hotkeyLabel(value: Hotkey, mac = IS_MAC, checked = false): string {
+  if (isPreset(value)) return mac ? MAC_PRESETS[value] : HOTKEYS[value].label;
+  const custom = checked ? parseKey(value) : parseCustom(value);
+  if (!custom) return hotkeyLabel(mac ? MAC_DEFAULT_HOTKEY : 'ctrl-space', mac);
+  const m = modifierNames(mac);
+  const mods = [custom.ctrl && m.ctrl, custom.alt && m.alt, custom.shift && m.shift, custom.win && m.win].filter((part): part is string => Boolean(part));
+  // ⌃⌥ Space, like the menus of macOS; Ctrl + Alt + Space on Windows.
+  return mac ? `${mods.join('')}${mods.length ? ' ' : ''}${keyName(custom.key, mac)}` : [...mods, keyName(custom.key)].join(' + ');
 }
