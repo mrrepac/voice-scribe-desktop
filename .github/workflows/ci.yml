@@ -22,8 +22,16 @@ jobs:
       - run: npm run build
 
   # macOS: the Swift helper, the tests and an unsigned .dmg to try a pull request on a Mac.
+  # Each runner builds its own architecture: npm installs only the host's sherpa-onnx package.
   mac:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-latest, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    name: mac (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,7 +53,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: github.event_name == 'pull_request'
         with:
-          name: mac-dmg
+          name: mac-dmg-${{ matrix.arch }}
           path: release/*.dmg
           if-no-files-found: error
           retention-days: 7
