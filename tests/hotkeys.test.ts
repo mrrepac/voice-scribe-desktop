@@ -23,8 +23,18 @@ test('shortcuts that would break typing or other commands are rejected', () => {
 });
 
 test('labels name the keys', () => {
-  assert.equal(hotkeyLabel('key:ctrl+alt+120'), 'Ctrl + Alt + F9');
-  assert.equal(hotkeyLabel('key:ctrl+shift+68'), 'Ctrl + Shift + D');
-  assert.equal(hotkeyLabel('key:20'), 'CapsLock');
-  assert.equal(hotkeyLabel('insert'), 'Insert');
+  assert.equal(hotkeyLabel('key:ctrl+alt+120', false), 'Ctrl + Alt + F9');
+  assert.equal(hotkeyLabel('key:ctrl+shift+68', false), 'Ctrl + Shift + D');
+  assert.equal(hotkeyLabel('key:20', false), 'CapsLock');
+  assert.equal(hotkeyLabel('insert', false), 'Insert');
+});
+
+test('macOS labels use the modifier symbols', () => {
+  assert.equal(hotkeyLabel('key:alt+32', true), '⌥ Space');
+  assert.equal(hotkeyLabel('key:ctrl+alt+shift+win+120', true), '⌃⌥⇧⌘ F9');
+  assert.equal(hotkeyLabel('ctrl-alt-space', true), '⌃⌥ Space');
+  assert.equal(hotkeyLabel('key:win+8', true), '⌘ Delete');
+  assert.equal(hotkeyLabel('toString' as never, true), '⌥ Space');
+  const problem = capturedHotkey(press(0x56, { ctrl: true, alt: true }), true);
+  assert.ok('error' in problem && problem.error.startsWith('⌃⌥ V'), JSON.stringify(problem));
 });

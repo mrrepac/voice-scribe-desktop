@@ -20,3 +20,34 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # macOS: the Swift helper, the tests and an unsigned .dmg to try a pull request on a Mac.
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - uses: actions/cache@v6
+        if: github.event_name == 'pull_request'
+        with:
+          path: models
+          key: gigaam-${{ hashFiles('src/shared/gigaam-model.json') }}
+      - run: npm run dist:mac
+        if: github.event_name == 'pull_request'
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'pull_request'
+        with:
+          name: mac-dmg
+          path: release/*.dmg
+          if-no-files-found: error
+          retention-days: 7
+      - run: npm run build
+        if: github.event_name != 'pull_request'

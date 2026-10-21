@@ -16,7 +16,8 @@
     "pack": "npm run fetch-model && npm run build && electron-builder --win --dir",
     "dist": "npm run fetch-model && npm run build && electron-builder --win nsis --publish never",
     "dist:portable": "npm run fetch-model && npm run build && electron-builder --win portable --publish never",
-    "fetch-model": "node scripts/fetch-model.mjs"
+    "fetch-model": "node scripts/fetch-model.mjs",
+    "dist:mac": "npm run fetch-model && npm run build && electron-builder --mac --publish never"
   },
   "devDependencies": {
     "@tabler/icons": "3.49.0",
@@ -50,7 +51,8 @@
         "to": "native",
         "filter": [
           "*.exe",
-          "*.config"
+          "*.config",
+          "VoiceScribeHelper"
         ]
       },
       {
@@ -68,6 +70,30 @@
       ],
       "icon": "assets/icon.ico",
       "signExecutable": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon-mac.png",
+      "category": "public.app-category.productivity",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Voice Scribe записывает речь, чтобы распознать её на этом Mac."
+      }
     },
     "artifactName": "Voice-Scribe-${version}-${arch}.${ext}",
     "asarUnpack": [

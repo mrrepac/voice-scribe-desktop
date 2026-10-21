@@ -1,5 +1,5 @@
-interface RecoverableBridge { on(event: string, handler: () => void): unknown; start(executable:string): void; stop(): void; }
-export interface NativeHealth { ready: boolean; retrying: boolean; message: string; }
+interface RecoverableBridge { on(event: string, handler: (...args: any[]) => void): unknown; start(executable:string): void; stop(): void; }
+export interface NativeHealth { ready: boolean; retrying: boolean; message: string; /** macOS permission the shortcuts wait for. */ permission?: string; }
 export class NativeRecovery {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private stable: ReturnType<typeof setTimeout> | undefined;
@@ -8,6 +8,11 @@ export class NativeRecovery {
   state: NativeHealth = {ready:false,retrying:false,message:'Подключаем горячие клавиши…'};
   constructor(private bridge: RecoverableBridge, private executable: string, private publish: (state: NativeHealth)=>void, private delays=[1000,3000,8000], private stableMs=30000) {
     bridge.on('failure',()=>this.failed());
+    bridge.on('permission',(permission:string)=>{
+      if(this.stopped)return;
+      const where=permission==='input-monitoring'?'Мониторинг ввода':'Универсальный доступ';
+      this.set({ready:false,retrying:false,permission,message:`Разрешите Voice Scribe в «Системные настройки → Конфиденциальность и безопасность → ${where}». Клавиши заработают сразу после этого.`});
+    });
     bridge.on('ready',()=>{
       if(this.stopped)return;
       this.set({ready:true,retrying:false,message:'Горячие клавиши подключены'});

@@ -63,3 +63,15 @@ test('failed check is recoverable without exposing server errors', async () => {
   await updates.check();
   assert.equal(updates.state.phase, 'current');
 });
+
+test('manual updates announce a version and open its page instead of downloading', async () => {
+  const fake = new FakeUpdater();
+  const opened: string[] = [];
+  const updates = new UpdateService(fake as unknown as ConstructorParameters<typeof UpdateService>[0], true, () => false, () => {}, version => opened.push(version));
+  await updates.check(true);
+  assert.equal(updates.state.phase, 'available');
+  assert.deepEqual(opened, [], 'a background check never opens the browser');
+  await updates.download();
+  assert.deepEqual(opened, ['0.3.0']);
+  assert.equal(fake.downloads, 0);
+});

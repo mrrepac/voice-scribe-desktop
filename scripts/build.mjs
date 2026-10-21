@@ -35,7 +35,11 @@ await writeFile('dist/index.html', html.replace(
 await copyFile('src/renderer/styles.css', 'dist/styles.css');
 await copyFile('src/main/overlay.html', 'dist/overlay.html');
 await copyFile('src/asr/tap-worklet.js','dist/tap-worklet.js');
-execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/icon.ps1'],{stdio:'inherit',windowsHide:true});
+// The icons are committed; Windows regenerates them from scripts/icon.ps1.
+if (process.platform === 'win32') execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','scripts/icon.ps1'],{stdio:'inherit',windowsHide:true});
 await copyFile('assets/icon.png','dist/icon.png');
+await copyFile('assets/trayTemplate.png','dist/trayTemplate.png');
+await copyFile('assets/trayTemplate@2x.png','dist/trayTemplate@2x.png');
 if (process.platform === 'win32') execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','native/build.ps1'],{stdio:'inherit',windowsHide:true});
+if (process.platform === 'darwin') execFileSync('sh',['native/mac/build.sh'],{stdio:'inherit'});
 console.log('Voice Scribe built.');

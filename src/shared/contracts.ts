@@ -1,10 +1,10 @@
-import type { Hotkey } from './hotkeys';
+import { DEFAULT_HOTKEY, type Hotkey } from './hotkeys';
 export interface Settings {
   microphone: string; silenceSeconds: number; sounds: boolean;
   startAtLogin: boolean; hotkey: Hotkey;
 }
 export const DEFAULT_SETTINGS: Settings = {
-  microphone: '', silenceSeconds: 0, sounds: true, startAtLogin: false, hotkey: 'ctrl-space',
+  microphone: '', silenceSeconds: 0, sounds: true, startAtLogin: false, hotkey: DEFAULT_HOTKEY,
 };
 /** 'file': an audio or video file is transcribed in the window; no dictation keys are involved. */
 export type Phase = 'idle' | 'starting' | 'recording' | 'transcribing' | 'preparing' | 'file' | 'error';
@@ -43,7 +43,9 @@ export interface ScribeAPI {
   status(value: Status): void;
   hide(): void;
   onCommand(handler: (command: Command) => void): () => void;
-  getAppInfo(): Promise<{version: string; dataPath: string; nativeReady: boolean; modelBundled: boolean}>;
+  getAppInfo(): Promise<{version: string; dataPath: string; nativeReady: boolean; modelBundled: boolean; mac: boolean}>;
+  /** macOS: opens Privacy & Security → Accessibility, which the global shortcuts need. */
+  openAccessibilitySettings(): Promise<void>;
   /** Records the next key press system-wide; null when cancelled with Esc or timed out. */
   captureHotkey(): Promise<import('./hotkeys').CapturedKey | null>;
   cancelHotkeyCapture(): Promise<void>;

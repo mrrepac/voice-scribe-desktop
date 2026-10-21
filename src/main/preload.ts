@@ -19,6 +19,7 @@ const api: ScribeAPI = {
   hide:()=>ipcRenderer.send('hide'),
   onCommand:handler=>{const fn=(_:unknown,cmd:Command)=>handler(cmd);ipcRenderer.on('command',fn);return()=>ipcRenderer.removeListener('command',fn);},
   getAppInfo:()=>ipcRenderer.invoke('app:info'),
+  openAccessibilitySettings:()=>ipcRenderer.invoke('accessibility:open'),
   captureHotkey:()=>ipcRenderer.invoke('hotkey:capture'),
   cancelHotkeyCapture:()=>ipcRenderer.invoke('hotkey:cancel-capture'),
   getNativeHealth:()=>ipcRenderer.invoke('native:health'),

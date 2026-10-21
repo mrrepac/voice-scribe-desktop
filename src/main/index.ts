@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, Tray, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, protocol, screen, session, shell, Tray, type WebContents } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +24,8 @@ if(smoke && process.argv.includes('--dictation-test')){
   app.commandLine.appendSwitch('use-file-for-fake-audio-capture',path.join(process.cwd(),'artifacts','fixture-ru.wav')+'%noloop');
 }
 const NAME='Voice Scribe';
+const MAC=process.platform==='darwin';
+const RELEASES='https://github.com/mrrepac/voice-scribe-desktop/releases/latest';
 const root = app.getAppPath();
 if(smoke)app.setPath('userData',path.join(process.cwd(),'.data','smoke'));
 else if (!app.isPackaged) app.setPath('userData',path.join(root,'.data'));
@@ -41,7 +43,9 @@ let lastStatus:Status={phase:'idle',message:'Готов к диктовке'};
 let hotkey:Hotkey='ctrl-space';
 let overlayShown=false;
 const bridge=new NativeBridge();
-const nativeRecovery=new NativeRecovery(bridge,app.isPackaged?path.join(process.resourcesPath,'native/VoiceScribe.Native.exe'):path.join(root,'native/bin/VoiceScribe.Native.exe'),state=>{
+// The shortcut helper: VoiceScribe.Native.exe on Windows, VoiceScribeHelper (Swift) on macOS.
+const helperName=MAC?'VoiceScribeHelper':'VoiceScribe.Native.exe';
+const nativeRecovery=new NativeRecovery(bridge,app.isPackaged?path.join(process.resourcesPath,'native',helperName):path.join(root,'native/bin',helperName),state=>{
   if(win && !win.isDestroyed())win.webContents.send('native:health',state);
 });
 const storage=new Storage(app.getPath('userData'), message => {
@@ -64,16 +68,18 @@ function setTooltip(text:string):void {
   const value=text.slice(0,120);
   if(tray && value!==tooltip){tooltip=value;tray.setToolTip(value);}
 }
-const installed = app.isPackaged && !smoke && !process.env.PORTABLE_EXECUTABLE_FILE && existsSync(path.join(process.resourcesPath,'installed.txt'));
+// macOS builds are unsigned and cannot replace themselves: new versions are announced and downloaded by hand.
+const installed = app.isPackaged && !smoke && (MAC || (!process.env.PORTABLE_EXECUTABLE_FILE && existsSync(path.join(process.resourcesPath,'installed.txt'))));
 const updates = new UpdateService(autoUpdater, installed, active, state => {
   if(win && !win.isDestroyed())win.webContents.send('updates:state',state);
-});
+}, MAC ? () => void shell.openExternal(RELEASES) : undefined);
 function show():void { win.show(); win.focus(); }
 function windowId(window:BrowserWindow):string {
   const handle=window.getNativeWindowHandle();
   return handle.length===8?handle.readBigUInt64LE().toString():handle.readUInt32LE().toString();
 }
-function ownWindowId():string { return windowId(win); }
+// macOS targets are applications (process ids); an Electron app is its main process.
+function ownWindowId():string { return MAC?String(process.pid):windowId(win); }
 function applyHotkey(value:Hotkey):void {
   hotkey=value;
   if(bridge.ready)void bridge.request('set-hotkey',{hotkey}).catch(error=>console.error('Hotkey change failed',error));
@@ -116,7 +122,8 @@ function showOverlay():void {
   overlay.showInactive();
 }
 function makeTray():void {
-  const icon=nativeImage.createFromPath(path.join(root,'dist/icon.png')).resize({width:24,height:24});
+  // A template image on macOS: the menu bar recolors it for light and dark mode.
+  const icon=MAC?nativeImage.createFromPath(path.join(root,'dist/trayTemplate.png')):nativeImage.createFromPath(path.join(root,'dist/icon.png')).resize({width:24,height:24});
   tray=new Tray(icon); setTooltip(`${NAME} · ${hotkeyLabel(hotkey)}`); tray.on('double-click',show); refreshTray();
 }
 function refreshTray():void {
@@ -128,6 +135,12 @@ function refreshTray():void {
     {label:'Выход',click:()=>{quitting=true;app.quit();}},
   ]));
 }
+function setLoginItem(openAtLogin:boolean):void {
+  // macOS ignores arguments; a start at login is recognized by wasOpenedAtLogin instead.
+  if(MAC)app.setLoginItemSettings({openAtLogin});
+  else app.setLoginItemSettings({openAtLogin,path:process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,args:['--hidden']});
+}
+const startHidden=()=>process.argv.includes('--hidden') || (MAC && app.getLoginItemSettings().wasOpenedAtLogin);
 function handle(name:string,fn:(...args:any[])=>unknown):void {
   ipcMain.handle(name,(event,...args)=>{
     if(event.sender!==win.webContents || !trusted(event.senderFrame?.url||'')) throw new Error('Untrusted IPC');
@@ -152,7 +165,7 @@ function setupIpc():void {
   handle('settings:save',async value=>{
     const saved=await storage.saveSettings(value);
     if(saved.hotkey!==hotkey)applyHotkey(saved.hotkey);
-    if(app.isPackaged && !smoke) app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,args:['--hidden']});
+    if(app.isPackaged && !smoke) setLoginItem(saved.startAtLogin);
     return saved;
   });
   handle('copy',text=>{
@@ -191,7 +204,12 @@ function setupIpc():void {
   handle('gigaam:prepare',()=>gigaam.prepare(gigaamProgress));
   handle('gigaam:recognize',(pcm,timed)=>gigaam.recognize(pcm,timed===true,gigaamProgress));
   handle('gigaam:cancel',()=>gigaam.cancel());
-  handle('app:info',()=>({version:app.getVersion(),dataPath:storage.root,nativeReady:bridge.ready,modelBundled}));
+  handle('app:info',()=>({version:app.getVersion(),dataPath:storage.root,nativeReady:bridge.ready,modelBundled,mac:MAC}));
+  handle('accessibility:open',()=>{
+    if(!MAC)return;
+    const pane=nativeRecovery.state.permission==='input-monitoring'?'Privacy_ListenEvent':'Privacy_Accessibility';
+    return shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+  });
   handle('hotkey:capture',captureHotkey);
   handle('hotkey:cancel-capture',()=>finishCapture?.(null));
   handle('native:health',()=>nativeRecovery.state);
@@ -228,23 +246,28 @@ async function createWindows():Promise<void> {
   win.webContents.on('render-process-gone',(_event,details)=>{console.error('Renderer stopped',details);gigaam.cancel();deliveryGeneration++;if(bridge.ready){void bridge.request('cancel-insert').catch(()=>{});void bridge.request('set-active',{active:false}).catch(()=>{});}overlay?.hide();if(!quitting)dialog.showErrorBox(NAME,'Процесс распознавания остановился. Перезапустите приложение.');});
   overlay=new BrowserWindow({width:430,height:90,show:false,transparent:true,frame:false,focusable:false,skipTaskbar:true,resizable:false,alwaysOnTop:true,webPreferences:{preload:path.join(root,'dist/overlay-preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}});
   overlay.setIgnoreMouseEvents(true);
+  if(MAC){overlay.setAlwaysOnTop(true,'floating');overlay.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});}
   logConsole(win.webContents,'renderer');logConsole(overlay.webContents,'overlay');
   overlay.webContents.on('render-process-gone',(_event,details)=>console.error('Overlay stopped',details));
   setupIpc();
   await Promise.all([win.loadURL('scribe://app/index.html'),overlay.loadURL('scribe://app/overlay.html')]);
-  if(!smoke && !process.argv.includes('--hidden'))show();
+  if(!smoke && !startHidden())show();
 }
 if(!app.requestSingleInstanceLock())app.quit();
 else {
-  log.write('INFO',`${NAME} ${app.getVersion()} · Electron ${process.versions.electron} · Windows ${os.release()} · ${app.isPackaged?(installed?'installed':'portable'):'development'}`);
+  log.write('INFO',`${NAME} ${app.getVersion()} · Electron ${process.versions.electron} · ${MAC?'macOS':'Windows'} ${os.release()} · ${app.isPackaged?(installed?'installed':'portable'):'development'}`);
   app.on('second-instance',()=>{if(win)show();});
+  // macOS: clicking the Dock icon brings the hidden window back.
+  app.on('activate',()=>{if(win)show();});
   app.on('child-process-gone',(_event,details)=>{if(details.reason!=='clean-exit')console.error('Child process stopped',details);});
   app.on('before-quit',()=>{quitting=true;gigaam.cancel();nativeRecovery.stop();});
   app.on('window-all-closed',()=>{});
   void app.whenReady().then(async()=>{
     // Settings must be imported before they are first read below.
-    if(modelBundled && !smoke)await migrateFromOlderApps(app.getPath('userData'),app.getPath('appData'),storage).catch(error=>console.error('Migration failed',error));
+    if(!MAC && modelBundled && !smoke)await migrateFromOlderApps(app.getPath('userData'),app.getPath('appData'),storage).catch(error=>console.error('Migration failed',error));
     protocol.handle('scribe',appResponse);
+    // macOS needs an application menu for Command+C/V/X/A/Z in the text field and Command+Q.
+    if(MAC)Menu.setApplicationMenu(Menu.buildFromTemplate([{role:'appMenu'},{role:'editMenu'},{role:'windowMenu'}]));
     session.defaultSession.setPermissionRequestHandler((contents,permission,callback,details)=>callback(contents===win?.webContents && permission==='media' && trusted(details.requestingUrl) && (!('mediaTypes' in details) || !details.mediaTypes || details.mediaTypes.every(t=>t==='audio'))));
     session.defaultSession.setPermissionCheckHandler((contents,permission,origin)=>contents===win?.webContents && permission==='media' && trusted(origin));
     // Smoke runs keep the renderer offline; GigaAM downloads in its own Node process.
@@ -263,7 +286,7 @@ else {
     await createWindows(); makeTray();
     if(installed){
       const saved=await storage.settings();
-      app.setLoginItemSettings({openAtLogin:saved.startAtLogin,path:process.execPath,args:['--hidden']});
+      setLoginItem(saved.startAtLogin);
       setTimeout(()=>void updates.check(true),15000).unref();
       setInterval(()=>void updates.check(true),6*60*60*1000).unref();
     }
