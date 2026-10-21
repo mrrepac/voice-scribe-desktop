@@ -47,8 +47,14 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # Each runner builds its own architecture: npm installs only the host's sherpa-onnx package.
   build-mac:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-latest, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -71,10 +77,12 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           mkdir upload
-          cp "release/Voice-Scribe-$version-arm64.dmg" "release/Voice-Scribe-$version-arm64.zip" release/latest-mac.yml upload/
+          cp "release/Voice-Scribe-$version-${{ matrix.arch }}.dmg" "release/Voice-Scribe-$version-${{ matrix.arch }}.zip" upload/
+          # Unsigned builds only read the version from it, so one copy serves both architectures.
+          if [ "${{ matrix.arch }}" = arm64 ]; then cp release/latest-mac.yml upload/; fi
       - uses: actions/upload-artifact@v7
         with:
-          name: release-mac
+          name: release-mac-${{ matrix.arch }}
           path: upload
           if-no-files-found: error
           retention-days: 1
@@ -98,7 +106,7 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME.Substring(1)
-          gh release create "v$version" "upload/Voice-Scribe-Setup-$version-x64.exe" "upload/Voice-Scribe-Setup-$version-x64.exe.blockmap" "upload/latest.yml" "upload/Voice-Scribe-$version-arm64.dmg" "upload/Voice-Scribe-$version-arm64.zip" "upload/latest-mac.yml" --verify-tag --draft --title "Voice Scribe $version" --generate-notes
+          gh release create "v$version" "upload/Voice-Scribe-Setup-$version-x64.exe" "upload/Voice-Scribe-Setup-$version-x64.exe.blockmap" "upload/latest.yml" "upload/Voice-Scribe-$version-arm64.dmg" "upload/Voice-Scribe-$version-arm64.zip" "upload/Voice-Scribe-$version-x64.dmg" "upload/Voice-Scribe-$version-x64.zip" "upload/latest-mac.yml" --verify-tag --draft --title "Voice Scribe $version" --generate-notes
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; it was not published' }
           gh release edit "v$version" --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

@@ -73,18 +73,8 @@
     },
     "mac": {
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "icon": "assets/icon-mac.png",
       "category": "public.app-category.productivity",
