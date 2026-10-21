@@ -20,7 +20,7 @@ if(process.argv.includes('--smoke') && existsSync('artifacts/fixture-ru.wav'))aw
 // Inline only the icons the app uses. No network or icon font is needed at runtime.
 const iconNames = {
   mic: 'microphone', copy: 'copy', download: 'download', stop: 'player-stop',
-  'chevron-down': 'chevron-down', tray: 'arrow-down-right', file: 'file-upload',
+  'chevron-down': 'chevron-down', tray: 'arrow-down-right', file: 'file-upload', save: 'device-floppy',
 };
 const symbols = await Promise.all(Object.entries(iconNames).map(async ([id, name]) => {
   const svg = await readFile(`node_modules/@tabler/icons/icons/outline/${name}.svg`, 'utf8');

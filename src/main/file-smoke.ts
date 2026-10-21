@@ -23,6 +23,7 @@ export async function fileSmokeTest(win: BrowserWindow): Promise<{ text: string;
     await until(() => phase() !== 'file', 'transcript');
     clearInterval(seen);
     if (phase() !== 'idle') throw new Error('File transcription failed: ' + $('record-description').textContent);
+    if ($('save-result').disabled) throw new Error('Saving is unavailable after a file transcription');
     return { text: $('result-text').value, note: $('result-note').textContent, percents };
   })()`);
   assert.match(report.text.toLowerCase().replace(/ё/g, 'е'), /квартал/, report.text);
