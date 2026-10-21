@@ -508,7 +508,7 @@ func selfTest() -> Int32 {
     check(router.hotkey == "key:alt+32", "a rejected shortcut keeps the previous one")
     events.removeAll()
     check(!key(0x20, true, ctrl: true), "Control+Space passes with a custom shortcut")
-    check(!key(0x20, true, alt: true, shift: true), "extra modifiers do not match")
+    check(!key(0x20, true, shift: true, alt: true), "extra modifiers do not match")
     check(key(0x20, true, alt: true) && last() == "dictation-down", "custom shortcut starts")
     time = 700
     check(!key(0xA4, false) && last() == "dictation-up", "releasing Option ends a hold and passes")
