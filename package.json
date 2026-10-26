@@ -23,7 +23,7 @@
     "@tabler/icons": "3.49.0",
     "@types/node": "^24.0.0",
     "electron": "44.7.0",
-    "electron-builder": "26.15.3",
+    "electron-builder": "26.18.0",
     "esbuild": "0.28.2",
     "typescript": "^5.9.3"
   },
@@ -112,7 +112,7 @@
     }
   },
   "dependencies": {
-    "electron-updater": "6.8.10",
+    "electron-updater": "6.8.11",
     "sherpa-onnx-node": "1.13.8"
   },
   "repository": {
